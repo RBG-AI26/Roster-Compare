@@ -1,4 +1,4 @@
-const CACHE_NAME = "roster-compare-static-v2";
+const CACHE_NAME = "roster-compare-static-v3";
 const APP_ASSETS = [
   "./",
   "./index.html",
@@ -31,18 +31,41 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+
   if (event.request.mode === "navigate") {
-    event.respondWith(fetch(event.request).catch(() => caches.match("./index.html")));
+    event.respondWith(networkFirst(event.request, "./index.html"));
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
+  if (isSameOrigin) {
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
 
-      return fetch(event.request);
-    })
-  );
+  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
 });
+
+async function networkFirst(request, fallbackCacheKey = null) {
+  const cache = await caches.open(CACHE_NAME);
+
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) {
+      return cached;
+    }
+
+    if (fallbackCacheKey) {
+      return caches.match(fallbackCacheKey);
+    }
+
+    throw new Error("Network unavailable and no cached response found.");
+  }
+}
