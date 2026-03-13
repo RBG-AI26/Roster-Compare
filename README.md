@@ -9,7 +9,6 @@ Browser-only web app for comparing two crew roster text files.
 - Runs entirely in the browser with no server dependency
 - Compares shared days off: `A`, `X`, `AL`, `GL`, `LSL`
 - Compares same-port shared time using a configurable hours-in-port threshold
-- Flags brief same-port arrival/departure crossovers
 - Marks unresolved duties as uncertain
 
 PDF support is intentionally out of scope for this version.

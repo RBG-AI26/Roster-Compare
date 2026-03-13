@@ -61,7 +61,7 @@ export function parseRosterText(fileName, rawText) {
   }
 
   const offDays = calendar.filter((entry) => OFF_DUTY_CODES.has(entry.dutyCode));
-  const { portWindows, touchpoints, unresolvedDuties } = buildDutyWindows(calendar, patterns);
+  const { portWindows, unresolvedDuties } = buildDutyWindows(calendar, patterns);
 
   return {
     crewName: crewName.replace(/\s+/g, " ").trim(),
@@ -74,7 +74,6 @@ export function parseRosterText(fileName, rawText) {
     patterns,
     offDays,
     portWindows,
-    touchpoints,
     unresolvedDuties,
     preview: text.split("\n").slice(0, 20).join("\n"),
   };
@@ -306,7 +305,6 @@ function parseFlightLine(line) {
 
 function buildDutyWindows(calendar, patterns) {
   const portWindows = [];
-  const touchpoints = [];
   const unresolvedDuties = [];
 
   for (const group of groupCalendarDuties(calendar)) {
@@ -328,20 +326,6 @@ function buildDutyWindows(calendar, patterns) {
 
     instantiated.forEach((leg, index) => {
       const { departureDateTime, arrivalDateTime, flight } = leg;
-      touchpoints.push({
-        start: departureDateTime,
-        end: departureDateTime,
-        port: flight.origin,
-        dutyCode: pattern.code,
-        matchType: "departure",
-      });
-      touchpoints.push({
-        start: arrivalDateTime,
-        end: arrivalDateTime,
-        port: flight.destination,
-        dutyCode: pattern.code,
-        matchType: "arrival",
-      });
 
       if (index + 1 < instantiated.length) {
         const nextLeg = instantiated[index + 1];
@@ -358,7 +342,7 @@ function buildDutyWindows(calendar, patterns) {
     });
   }
 
-  return { portWindows, touchpoints, unresolvedDuties };
+  return { portWindows, unresolvedDuties };
 }
 
 function groupCalendarDuties(calendar) {
@@ -467,7 +451,6 @@ function compareDaysOff(rosterA, rosterB) {
 
 function comparePortMatches(rosterA, rosterB, portMatchWindowMs = DEFAULT_PORT_MATCH_WINDOW_MS) {
   const matches = [];
-  const overlapKeys = new Set();
 
   for (const windowA of rosterA.portWindows) {
     for (const windowB of rosterB.portWindows) {
@@ -482,7 +465,6 @@ function comparePortMatches(rosterA, rosterB, portMatchWindowMs = DEFAULT_PORT_M
       }
 
       const date = formatIsoLocalDate(new Date(overlapStart));
-      overlapKeys.add(buildPortKey(date, windowA.port, windowA.dutyCode, windowB.dutyCode));
       matches.push({
         date,
         port: windowA.port,
@@ -497,40 +479,7 @@ function comparePortMatches(rosterA, rosterB, portMatchWindowMs = DEFAULT_PORT_M
     }
   }
 
-  for (const pointA of rosterA.touchpoints) {
-    for (const pointB of rosterB.touchpoints) {
-      if (pointA.port !== pointB.port || pointA.matchType === pointB.matchType) {
-        continue;
-      }
-
-      const delta = Math.abs(pointA.start.getTime() - pointB.start.getTime());
-      if (delta > portMatchWindowMs) {
-        continue;
-      }
-
-      const date = formatIsoLocalDate(new Date(Math.min(pointA.start.getTime(), pointB.start.getTime())));
-      if (overlapKeys.has(buildPortKey(date, pointA.port, pointA.dutyCode, pointB.dutyCode))) {
-        continue;
-      }
-
-      matches.push({
-        date,
-        port: pointA.port,
-        match_type: "Port match",
-        match_key: "port_match",
-        crew_a: `${pointA.dutyCode} ${pointA.matchType}`,
-        crew_b: `${pointB.dutyCode} ${pointB.matchType}`,
-        window_a: formatPoint(pointA.start),
-        window_b: formatPoint(pointB.start),
-        visual_group: "away_port",
-      });
-    }
-  }
   return dedupeMatches(matches);
-}
-
-function buildPortKey(date, port, crewADuty, crewBDuty) {
-  return [date, port, crewADuty, crewBDuty].join("|");
 }
 
 function dedupeMatches(matches) {
@@ -598,11 +547,6 @@ function formatWindow(start, end) {
   const startParts = buildDateParts(start);
   const endParts = buildDateParts(end);
   return `${startParts.day}/${startParts.month} ${startParts.hours}:${startParts.minutes} to ${endParts.day}/${endParts.month} ${endParts.hours}:${endParts.minutes}`;
-}
-
-function formatPoint(date) {
-  const parts = buildDateParts(date);
-  return `${parts.day}/${parts.month} ${parts.hours}:${parts.minutes}`;
 }
 
 function differenceInDays(left, right) {
