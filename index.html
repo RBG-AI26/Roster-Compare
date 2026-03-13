@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f3eee2" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Roster Compare" />
+    <title>Roster Compare</title>
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Roster Compare</p>
+        <h1>Open two text rosters and compare overlap directly on your device.</h1>
+        <p class="intro">
+          This version is fully browser-based. Upload one text roster for each crew member and the comparison runs
+          locally in Safari or any modern mobile browser. No Mac server and no PDF handling.
+        </p>
+      </section>
+
+      <form id="compare-form" class="panel-grid">
+        <section class="panel">
+          <h2>Crew A</h2>
+          <p class="panel-copy">Select a single ARMS or webCIS text roster.</p>
+          <label class="dropzone">
+            <span>Choose roster text file</span>
+            <input type="file" name="crew_a" accept=".txt,text/plain" required />
+          </label>
+          <ul class="file-list" data-file-list="crew_a"></ul>
+        </section>
+
+        <section class="panel">
+          <h2>Crew B</h2>
+          <p class="panel-copy">Select the second crew member’s text roster.</p>
+          <label class="dropzone">
+            <span>Choose roster text file</span>
+            <input type="file" name="crew_b" accept=".txt,text/plain" required />
+          </label>
+          <ul class="file-list" data-file-list="crew_b"></ul>
+        </section>
+      </form>
+
+      <section class="actions">
+        <button id="compare-button" type="submit" form="compare-form">Compare rosters</button>
+        <p id="status" class="status">Choose two text files to begin.</p>
+      </section>
+
+      <section id="results" class="results hidden">
+        <div class="summary-row">
+          <article class="summary-card" id="summary-a"></article>
+          <article class="summary-card" id="summary-b"></article>
+        </div>
+
+        <article class="results-card">
+          <div class="results-head">
+            <h2>Overlap Matches</h2>
+            <p>Times are shown in roster local time.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Port</th>
+                  <th>Match Type</th>
+                  <th>Crew A</th>
+                  <th>Crew B</th>
+                  <th>Crew A Window</th>
+                  <th>Crew B Window</th>
+                  <th>Confidence</th>
+                </tr>
+              </thead>
+              <tbody id="results-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="results-card">
+          <h2>Notes</h2>
+          <ul id="notes" class="notes"></ul>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

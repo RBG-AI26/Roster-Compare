@@ -1,0 +1,16 @@
+{
+  "name": "Roster Compare",
+  "short_name": "RosterCompare",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f3eee2",
+  "theme_color": "#f3eee2",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

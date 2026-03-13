@@ -1,49 +1,40 @@
-# Roster Overlap
+# Roster Compare
 
-Local app for comparing two crew rosters.
+Browser-only web app for comparing two crew roster text files.
 
-## Features
+## Current Scope
 
-- Upload multiple TXT and PDF roster files for each crew member
-- Prefer `ARMS` sources over `webCIS`, then PDF email exports
-- Compare shared days off: `A`, `X`, `AL`, `GL`, `LSL`
-- Compare same-port overlap of at least one hour
-- Flag brief same-port arrival/departure crossovers
-- Mark unresolved pattern parsing as uncertain instead of silently assuming a match
+- Upload one TXT roster for each crew member
+- Works directly in Safari on iPhone and iPad
+- Runs entirely in the browser with no server dependency
+- Compares shared days off: `A`, `X`, `AL`, `GL`, `LSL`
+- Compares same-port overlap of at least one hour
+- Flags brief same-port arrival/departure crossovers
+- Marks unresolved duties as uncertain
 
-## Quick Start
+PDF support is intentionally out of scope for this version.
 
-```bash
-git clone https://github.com/RBG-AI26/Roster-Compare.git
-cd Roster-Compare
-./run.sh
-```
+## Use
 
-Open `http://127.0.0.1:8000`.
+Open the hosted web app in a browser, then choose one text roster for each crew member and tap `Compare rosters`.
 
-To use it on an iPad or iPhone, keep the Mac running on the same Wi‑Fi network and open the LAN URL printed by the server in Safari.
+If you want to run it locally without deploying, serve the repository as a static site with any simple file server.
 
-## Manual Run
+## Mobile
 
-```bash
-python3 server.py
-```
+- Open the site in Safari on iPhone or iPad
+- Select the two roster text files from Files
+- Optional: use `Share` -> `Add to Home Screen`
 
-The app uses only the Python standard library for the server. PDF parsing uses macOS native frameworks via `clang`, so this project is intended for macOS.
+## Deploy
 
-## iPad And iPhone
+This repo now includes a root `index.html`, so it can be hosted directly as a static site, including GitHub Pages.
 
-- Start the server on your Mac with `./run.sh`
-- Look for the printed line `Open on iPhone/iPad at http://...`
-- Open that address in Safari on the iPad or iPhone
-- Optional: use Safari `Share` -> `Add to Home Screen`
+## Main Files
 
-The comparison still runs on the Mac, which is why PDF handling continues to work on mobile browsers.
-
-## Files
-
-- `server.py`: HTTP server and upload endpoint
-- `roster_logic.py`: roster parsing and overlap comparison
-- `pdf_extract.m`: native PDF extraction with OCR fallback
-- `run.sh`: simple launcher
-- `static/`: browser UI
+- `index.html`: app entry page
+- `app.js`: browser UI logic
+- `roster-browser.js`: client-side roster parsing and comparison
+- `styles.css`: mobile-first styling
+- `manifest.json`: installable web app metadata
+- `service-worker.js`: offline asset caching
