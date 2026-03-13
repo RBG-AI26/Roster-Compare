@@ -8,17 +8,27 @@ const DAY_CODES = new Map([
   ["SA", 6],
   ["SU", 7],
 ]);
-const MIN_PORT_OVERLAP_MS = 60 * 60 * 1000;
+const DEFAULT_MIN_PORT_OVERLAP_MS = 60 * 60 * 1000;
 const BRIEF_PORT_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+const MATCH_SORT_ORDER = new Map([
+  ["port_overlap", 0],
+  ["brief_crossover", 1],
+  ["shared_day_off", 2],
+]);
 
-export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText) {
+export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, options = {}) {
   const rosterA = parseRosterText(crewAFile, crewAText);
   const rosterB = parseRosterText(crewBFile, crewBText);
+  const minPortOverlapMs = Math.max(1, Number(options.minPortOverlapHours || 1)) * 60 * 60 * 1000;
   const matches = [
     ...compareDaysOff(rosterA, rosterB),
-    ...comparePortWindows(rosterA, rosterB),
+    ...comparePortWindows(rosterA, rosterB, minPortOverlapMs),
     ...compareTouchpoints(rosterA, rosterB),
   ].sort((left, right) => {
+    const prioritySort = (MATCH_SORT_ORDER.get(left.match_key) ?? 99) - (MATCH_SORT_ORDER.get(right.match_key) ?? 99);
+    if (prioritySort !== 0) {
+      return prioritySort;
+    }
     const dateSort = left.date.localeCompare(right.date);
     if (dateSort !== 0) {
       return dateSort;
@@ -446,18 +456,20 @@ function compareDaysOff(rosterA, rosterB) {
       date: key,
       port: rosterA.base && rosterA.base === rosterB.base ? rosterA.base : `${rosterA.base || "?"} / ${rosterB.base || "?"}`,
       match_type: "Shared day off",
+      match_key: "shared_day_off",
       crew_a: `${entryA.dutyCode} (${rosterA.base || "base unknown"})`,
       crew_b: `${entryB.dutyCode} (${rosterB.base || "base unknown"})`,
       window_a: "All day",
       window_b: "All day",
-      confidence: "high",
+      visual_group: "home_match",
+      visual_label: "Home base or day off",
     });
   }
 
   return matches;
 }
 
-function comparePortWindows(rosterA, rosterB) {
+function comparePortWindows(rosterA, rosterB, minPortOverlapMs = DEFAULT_MIN_PORT_OVERLAP_MS) {
   const matches = [];
   for (const windowA of rosterA.portWindows) {
     for (const windowB of rosterB.portWindows) {
@@ -467,7 +479,7 @@ function comparePortWindows(rosterA, rosterB) {
 
       const overlapStart = Math.max(windowA.start.getTime(), windowB.start.getTime());
       const overlapEnd = Math.min(windowA.end.getTime(), windowB.end.getTime());
-      if (overlapEnd - overlapStart < MIN_PORT_OVERLAP_MS) {
+      if (overlapEnd - overlapStart < minPortOverlapMs) {
         continue;
       }
 
@@ -475,11 +487,13 @@ function comparePortWindows(rosterA, rosterB) {
         date: formatIsoLocalDate(new Date(overlapStart)),
         port: windowA.port,
         match_type: "Port overlap",
+        match_key: "port_overlap",
         crew_a: windowA.dutyCode,
         crew_b: windowB.dutyCode,
         window_a: formatWindow(windowA.start, windowA.end),
         window_b: formatWindow(windowB.start, windowB.end),
-        confidence: "high",
+        visual_group: "away_port",
+        visual_label: "Away-port match",
       });
     }
   }
@@ -507,11 +521,13 @@ function compareTouchpoints(rosterA, rosterB) {
         date: formatIsoLocalDate(new Date(Math.min(pointA.start.getTime(), pointB.start.getTime()))),
         port: pointA.port,
         match_type: "Brief port crossover",
+        match_key: "brief_crossover",
         crew_a: `${pointA.dutyCode} ${pointA.matchType}`,
         crew_b: `${pointB.dutyCode} ${pointB.matchType}`,
         window_a: formatPoint(pointA.start),
         window_b: formatPoint(pointB.start),
-        confidence: "medium",
+        visual_group: "away_port",
+        visual_label: "Away-port match",
       });
     }
   }

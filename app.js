@@ -2,12 +2,18 @@ import { compareRosterTexts } from "./roster-browser.js";
 
 const form = document.getElementById("compare-form");
 const compareButton = document.getElementById("compare-button");
+const minOverlapInput = document.getElementById("min-overlap-hours");
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
 const resultsBody = document.getElementById("results-body");
 const notesEl = document.getElementById("notes");
 const summaryA = document.getElementById("summary-a");
 const summaryB = document.getElementById("summary-b");
+const filterBar = document.getElementById("match-filters");
+
+let currentInputs = null;
+let currentPayload = null;
+let activeFilter = "all";
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
@@ -18,6 +24,24 @@ if ("serviceWorker" in navigator) {
 for (const input of form.querySelectorAll('input[type="file"]')) {
   input.addEventListener("change", () => renderFileList(input));
 }
+
+minOverlapInput.addEventListener("change", () => {
+  if (currentInputs) {
+    rerunComparison();
+  }
+});
+
+filterBar.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-filter]");
+  if (!button) {
+    return;
+  }
+  activeFilter = button.dataset.filter;
+  updateActiveFilterButton();
+  if (currentPayload) {
+    renderResults(currentPayload);
+  }
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -34,9 +58,13 @@ form.addEventListener("submit", async (event) => {
 
   try {
     const [crewAText, crewBText] = await Promise.all([crewAFile.text(), crewBFile.text()]);
-    const payload = compareRosterTexts(crewAFile.name, crewAText, crewBFile.name, crewBText);
-    renderResults(payload);
-    statusEl.textContent = `Comparison complete. ${payload.matches.length} match(es) found.`;
+    currentInputs = {
+      crewAFileName: crewAFile.name,
+      crewAText,
+      crewBFileName: crewBFile.name,
+      crewBText,
+    };
+    rerunComparison();
   } catch (error) {
     resultsEl.classList.add("hidden");
     statusEl.textContent = error instanceof Error ? error.message : "Comparison failed.";
@@ -44,6 +72,22 @@ form.addEventListener("submit", async (event) => {
     compareButton.disabled = false;
   }
 });
+
+function rerunComparison() {
+  if (!currentInputs) {
+    return;
+  }
+
+  const payload = compareRosterTexts(
+    currentInputs.crewAFileName,
+    currentInputs.crewAText,
+    currentInputs.crewBFileName,
+    currentInputs.crewBText,
+    { minPortOverlapHours: Number(minOverlapInput.value || 1) }
+  );
+  currentPayload = payload;
+  renderResults(payload);
+}
 
 function renderFileList(input) {
   const list = document.querySelector(`[data-file-list="${input.name}"]`);
@@ -65,22 +109,23 @@ function renderResults(payload) {
   renderSummary(summaryA, "Crew A", payload.crew_a);
   renderSummary(summaryB, "Crew B", payload.crew_b);
 
+  const filteredMatches = payload.matches.filter((match) => activeFilter === "all" || match.match_key === activeFilter);
   resultsBody.innerHTML = "";
-  if (!payload.matches.length) {
-    resultsBody.innerHTML = '<tr><td colspan="8" class="empty-state">No matches found under the current rules.</td></tr>';
+  if (!filteredMatches.length) {
+    resultsBody.innerHTML = '<tr><td colspan="7" class="empty-state">No matches found under the current rules.</td></tr>';
   }
 
-  for (const match of payload.matches) {
+  for (const match of filteredMatches) {
     const row = document.createElement("tr");
+    row.className = match.visual_group === "away_port" ? "away-port-row" : "home-match-row";
     row.innerHTML = `
       <td>${escapeHtml(match.date)}</td>
       <td>${escapeHtml(match.port)}</td>
-      <td>${escapeHtml(match.match_type)}</td>
+      <td>${escapeHtml(match.match_type)}<div class="match-tag ${escapeHtml(match.visual_group).replace("_", "-")}">${escapeHtml(match.visual_label)}</div></td>
       <td>${escapeHtml(match.crew_a)}</td>
       <td>${escapeHtml(match.crew_b)}</td>
       <td>${escapeHtml(match.window_a)}</td>
       <td>${escapeHtml(match.window_b)}</td>
-      <td><span class="pill">${escapeHtml(match.confidence)}</span></td>
     `;
     resultsBody.appendChild(row);
   }
@@ -91,9 +136,28 @@ function renderResults(payload) {
     item.textContent = note;
     notesEl.appendChild(item);
   }
+
+  statusEl.textContent = `Comparison complete. ${filteredMatches.length} displayed match(es) of ${payload.matches.length} total.`;
 }
 
 function renderSummary(target, label, summary) {
+  const uncertainMarkup = summary.unresolved_duties.length
+    ? `
+      <ul class="uncertain-list">
+        ${summary.unresolved_duties
+          .map(
+            (item) => `
+              <li>
+                <span>${escapeHtml(item.date)}</span>
+                <span class="duty-code">${escapeHtml(item.duty_code)}</span>
+              </li>
+            `
+          )
+          .join("")}
+      </ul>
+    `
+    : `<p class="empty-state">No uncertain duties.</p>`;
+
   target.innerHTML = `
     <p class="eyebrow">${label}</p>
     <h3>${escapeHtml(summary.crew_name)}</h3>
@@ -103,7 +167,14 @@ function renderSummary(target, label, summary) {
       <li>Bid period: ${escapeHtml(summary.bid_period || "Unknown")}</li>
       <li>Uncertain duties: ${escapeHtml(String(summary.unresolved_duties.length))}</li>
     </ul>
+    ${uncertainMarkup}
   `;
+}
+
+function updateActiveFilterButton() {
+  for (const button of filterBar.querySelectorAll("[data-filter]")) {
+    button.classList.toggle("is-active", button.dataset.filter === activeFilter);
+  }
 }
 
 function escapeHtml(value) {

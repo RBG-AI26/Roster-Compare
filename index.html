@@ -46,6 +46,10 @@
       </form>
 
       <section class="actions">
+        <label class="control-card" for="min-overlap-hours">
+          <span>Minimum layover overlap</span>
+          <input id="min-overlap-hours" name="min_overlap_hours" type="number" min="1" max="24" step="1" value="1" />
+        </label>
         <button id="compare-button" type="submit" form="compare-form">Compare rosters</button>
         <p id="status" class="status">Choose two text files to begin.</p>
       </section>
@@ -61,6 +65,12 @@
             <h2>Overlap Matches</h2>
             <p>Times are shown in roster local time.</p>
           </div>
+          <div id="match-filters" class="filter-bar" role="tablist" aria-label="Match filters">
+            <button type="button" class="filter-chip is-active" data-filter="all">All</button>
+            <button type="button" class="filter-chip" data-filter="port_overlap">Port overlap</button>
+            <button type="button" class="filter-chip" data-filter="brief_crossover">Brief crossover</button>
+            <button type="button" class="filter-chip" data-filter="shared_day_off">Days off</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -72,7 +82,6 @@
                   <th>Crew B</th>
                   <th>Crew A Window</th>
                   <th>Crew B Window</th>
-                  <th>Confidence</th>
                 </tr>
               </thead>
               <tbody id="results-body"></tbody>
