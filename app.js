@@ -255,9 +255,9 @@ function updateResultsTableHeaders(crewA, crewB) {
   const crewBFirstName = getFirstName(crewB.crew_name) || "Crew B";
 
   resultsCrewAHeader.textContent = crewAFirstName;
-  resultsCrewAWindowHeader.textContent = `${crewAFirstName} Window`;
+  resultsCrewAWindowHeader.textContent = "Window";
   resultsCrewBHeader.textContent = crewBFirstName;
-  resultsCrewBWindowHeader.textContent = `${crewBFirstName} Window`;
+  resultsCrewBWindowHeader.textContent = "Window";
 }
 
 function getFirstName(fullName) {
