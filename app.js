@@ -265,7 +265,8 @@ function getFirstName(fullName) {
     return "";
   }
 
-  return fullName.trim().split(/\s+/)[0] || "";
+  const parts = fullName.trim().split(/\s+/);
+  return parts[parts.length - 1] || "";
 }
 
 function loadPersistedState() {
