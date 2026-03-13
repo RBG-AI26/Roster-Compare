@@ -47,7 +47,7 @@
 
       <section class="actions">
         <label class="control-card" for="min-overlap-hours">
-          <span>Minimum layover overlap</span>
+          <span>Port match window (hours)</span>
           <input id="min-overlap-hours" name="min_overlap_hours" type="number" min="1" max="24" step="1" value="1" />
         </label>
         <button id="compare-button" type="submit" form="compare-form">Compare rosters</button>
@@ -67,8 +67,7 @@
           </div>
           <div id="match-filters" class="filter-bar" role="tablist" aria-label="Match filters">
             <button type="button" class="filter-chip is-active" data-filter="all">All</button>
-            <button type="button" class="filter-chip" data-filter="port_overlap">Port overlap</button>
-            <button type="button" class="filter-chip" data-filter="brief_crossover">Brief crossover</button>
+            <button type="button" class="filter-chip" data-filter="port_match">Port match</button>
             <button type="button" class="filter-chip" data-filter="shared_day_off">Days off</button>
           </div>
           <div class="table-wrap">
