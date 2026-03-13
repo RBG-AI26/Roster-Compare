@@ -7,6 +7,12 @@ const notesEl = document.getElementById("notes");
 const summaryA = document.getElementById("summary-a");
 const summaryB = document.getElementById("summary-b");
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}
+
 for (const input of form.querySelectorAll('input[type="file"]')) {
   input.addEventListener("change", () => renderFileList(input));
 }

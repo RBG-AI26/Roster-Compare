@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import cgi
 import json
+import os
+import socket
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -60,9 +62,26 @@ class RosterHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", 8000), RosterHandler)
-    print("Roster Overlap app running at http://127.0.0.1:8000")
+    host = os.environ.get("ROSTER_HOST", "0.0.0.0")
+    port = int(os.environ.get("ROSTER_PORT", "8000"))
+    server = ThreadingHTTPServer((host, port), RosterHandler)
+
+    print(f"Roster Overlap app running at http://127.0.0.1:{port}")
+    lan_ip = _detect_lan_ip()
+    if lan_ip:
+        print(f"Open on iPhone/iPad at http://{lan_ip}:{port}")
     server.serve_forever()
+
+
+def _detect_lan_ip() -> str:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        sock.close()
 
 
 if __name__ == "__main__":

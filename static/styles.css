@@ -102,6 +102,7 @@ li {
   border-radius: 18px;
   background: linear-gradient(180deg, rgba(15, 108, 92, 0.06), rgba(255, 255, 255, 0.65));
   cursor: pointer;
+  min-height: 132px;
 }
 
 .dropzone span {
@@ -111,6 +112,7 @@ li {
 
 .dropzone input {
   width: 100%;
+  font-size: 16px;
 }
 
 .file-list,
@@ -141,6 +143,7 @@ button {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
   color: white;
   padding: 14px 24px;
+  min-height: 52px;
   font-size: 1rem;
   font-weight: 700;
   cursor: pointer;
@@ -215,9 +218,43 @@ th {
 }
 
 @media (max-width: 860px) {
+  .shell {
+    width: min(100% - 20px, 1180px);
+    padding: 28px 0 48px;
+  }
+
+  h1 {
+    line-height: 1;
+  }
+
   .actions,
   .results-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .panel,
+  .summary-card,
+  .results-card {
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  th,
+  td {
+    min-width: 120px;
+  }
+}
+
+@media (max-width: 560px) {
+  .actions {
+    position: sticky;
+    bottom: 0;
+    padding: 12px 0 4px;
+    background: linear-gradient(180deg, rgba(243, 238, 226, 0), rgba(243, 238, 226, 0.96) 32%);
+  }
+
+  button {
+    width: 100%;
   }
 }
