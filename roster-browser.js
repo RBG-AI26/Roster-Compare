@@ -442,16 +442,15 @@ function compareDaysOff(rosterA, rosterB) {
       continue;
     }
 
-    const sameBase = rosterA.base && rosterA.base === rosterB.base;
     matches.push({
       date: key,
-      port: sameBase ? rosterA.base : `${rosterA.base || "?"} / ${rosterB.base || "?"}`,
+      port: rosterA.base && rosterA.base === rosterB.base ? rosterA.base : `${rosterA.base || "?"} / ${rosterB.base || "?"}`,
       match_type: "Shared day off",
       crew_a: `${entryA.dutyCode} (${rosterA.base || "base unknown"})`,
       crew_b: `${entryB.dutyCode} (${rosterB.base || "base unknown"})`,
       window_a: "All day",
       window_b: "All day",
-      confidence: sameBase ? "high" : "medium",
+      confidence: "high",
     });
   }
 
@@ -495,6 +494,10 @@ function compareTouchpoints(rosterA, rosterB) {
         continue;
       }
 
+      if (isExcludedSameDayArrivalDeparture(pointA, pointB)) {
+        continue;
+      }
+
       const delta = Math.abs(pointA.start.getTime() - pointB.start.getTime());
       if (delta > BRIEF_PORT_THRESHOLD_MS) {
         continue;
@@ -513,6 +516,22 @@ function compareTouchpoints(rosterA, rosterB) {
     }
   }
   return dedupeMatches(matches);
+}
+
+function isExcludedSameDayArrivalDeparture(pointA, pointB) {
+  const arrivalPoint = pointA.matchType === "arrival" ? pointA : pointB.matchType === "arrival" ? pointB : null;
+  const departurePoint = pointA.matchType === "departure" ? pointA : pointB.matchType === "departure" ? pointB : null;
+  if (!arrivalPoint || !departurePoint) {
+    return false;
+  }
+
+  const sameLocalDay = formatIsoLocalDate(arrivalPoint.start) === formatIsoLocalDate(departurePoint.start);
+  if (!sameLocalDay) {
+    return false;
+  }
+
+  const delta = departurePoint.start.getTime() - arrivalPoint.start.getTime();
+  return delta >= 0 && delta <= 4 * 60 * 60 * 1000;
 }
 
 function dedupeMatches(matches) {
