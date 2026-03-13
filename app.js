@@ -101,10 +101,6 @@ function renderSummary(target, label, summary) {
       <li>Staff number: ${escapeHtml(summary.staff_number || "Unknown")}</li>
       <li>Base: ${escapeHtml(summary.base || "Unknown")}</li>
       <li>Bid period: ${escapeHtml(summary.bid_period || "Unknown")}</li>
-      <li>Roster type: ${escapeHtml(summary.source)}</li>
-      <li>Selected file: ${escapeHtml(summary.file_name)}</li>
-      <li>Off days parsed: ${escapeHtml(String(summary.off_days))}</li>
-      <li>Resolved port windows: ${escapeHtml(String(summary.resolved_patterns))}</li>
       <li>Uncertain duties: ${escapeHtml(String(summary.unresolved_duties.length))}</li>
     </ul>
   `;
