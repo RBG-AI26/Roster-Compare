@@ -351,7 +351,7 @@ function buildDutyWindows(calendar, patterns) {
             end: nextLeg.departureDateTime,
             port: flight.destination,
             dutyCode: pattern.code,
-            matchType: "layover",
+            matchType: "in_port",
           });
         }
       }
@@ -459,7 +459,6 @@ function compareDaysOff(rosterA, rosterB) {
       window_a: "All day",
       window_b: "All day",
       visual_group: "home_match",
-      visual_label: "Home base or day off",
     });
   }
 
@@ -494,7 +493,6 @@ function comparePortMatches(rosterA, rosterB, portMatchWindowMs = DEFAULT_PORT_M
         window_a: formatWindow(windowA.start, windowA.end),
         window_b: formatWindow(windowB.start, windowB.end),
         visual_group: "away_port",
-        visual_label: "Layover overlap",
       });
     }
   }
@@ -525,7 +523,6 @@ function comparePortMatches(rosterA, rosterB, portMatchWindowMs = DEFAULT_PORT_M
         window_a: formatPoint(pointA.start),
         window_b: formatPoint(pointB.start),
         visual_group: "away_port",
-        visual_label: "Transit crossover",
       });
     }
   }

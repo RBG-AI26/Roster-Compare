@@ -54,7 +54,7 @@ form.addEventListener("submit", async (event) => {
   }
 
   compareButton.disabled = true;
-  statusEl.textContent = "Reading rosters and comparing overlap...";
+  statusEl.textContent = "Reading rosters and comparing port matches...";
 
   try {
     const [crewAText, crewBText] = await Promise.all([crewAFile.text(), crewBFile.text()]);
@@ -121,7 +121,7 @@ function renderResults(payload) {
     row.innerHTML = `
       <td>${escapeHtml(match.date)}</td>
       <td>${escapeHtml(match.port)}</td>
-      <td>${escapeHtml(match.match_type)}<div class="match-tag ${escapeHtml(match.visual_group).replace("_", "-")}">${escapeHtml(match.visual_label)}</div></td>
+      <td>${escapeHtml(match.match_type)}</td>
       <td>${escapeHtml(match.crew_a)}</td>
       <td>${escapeHtml(match.crew_b)}</td>
       <td>${escapeHtml(match.window_a)}</td>

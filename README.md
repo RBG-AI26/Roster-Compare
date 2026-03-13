@@ -8,7 +8,7 @@ Browser-only web app for comparing two crew roster text files.
 - Works directly in Safari on iPhone and iPad
 - Runs entirely in the browser with no server dependency
 - Compares shared days off: `A`, `X`, `AL`, `GL`, `LSL`
-- Compares same-port overlap of at least one hour
+- Compares same-port shared time using a configurable hours-in-port threshold
 - Flags brief same-port arrival/departure crossovers
 - Marks unresolved duties as uncertain
 
