@@ -168,7 +168,7 @@ function renderResults(payload) {
   const filteredMatches = payload.matches.filter((match) => activeFilter === "all" || match.match_key === activeFilter);
   resultsBody.innerHTML = "";
   if (!filteredMatches.length) {
-    resultsBody.innerHTML = '<tr><td colspan="7" class="empty-state">No matches found under the current rules.</td></tr>';
+    resultsBody.innerHTML = '<tr><td colspan="8" class="empty-state">No matches found under the current rules.</td></tr>';
   }
 
   for (const match of filteredMatches) {
@@ -178,6 +178,7 @@ function renderResults(payload) {
       <td>${escapeHtml(match.date)}</td>
       <td>${escapeHtml(match.port)}</td>
       <td>${escapeHtml(match.match_type)}</td>
+      <td>${escapeHtml(match.overlap_window)}</td>
       <td>${escapeHtml(match.crew_a)}</td>
       <td>${escapeHtml(match.window_a)}</td>
       <td>${escapeHtml(match.crew_b)}</td>
