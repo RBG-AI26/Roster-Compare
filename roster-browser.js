@@ -26,7 +26,7 @@ export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, o
     if (prioritySort !== 0) {
       return prioritySort;
     }
-    const dateSort = left.date.localeCompare(right.date);
+    const dateSort = left.sort_date.localeCompare(right.sort_date);
     if (dateSort !== 0) {
       return dateSort;
     }
@@ -423,18 +423,19 @@ function jsWeekdayToIso(jsDay) {
 }
 
 function compareDaysOff(rosterA, rosterB) {
-  const byDate = new Map(rosterB.offDays.map((entry) => [formatIsoLocalDate(entry.date), entry]));
+  const byDate = new Map(rosterB.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
   const matches = [];
 
   for (const entryA of rosterA.offDays) {
-    const key = formatIsoLocalDate(entryA.date);
+    const key = formatSortableLocalDate(entryA.date);
     const entryB = byDate.get(key);
     if (!entryB) {
       continue;
     }
 
     matches.push({
-      date: key,
+      date: formatDisplayLocalDate(entryA.date),
+      sort_date: key,
       port: rosterA.base && rosterA.base === rosterB.base ? rosterA.base : `${rosterA.base || "?"} / ${rosterB.base || "?"}`,
       match_type: "Shared day off",
       match_key: "shared_day_off",
@@ -464,9 +465,10 @@ function comparePortMatches(rosterA, rosterB, portMatchWindowMs = DEFAULT_PORT_M
         continue;
       }
 
-      const date = formatIsoLocalDate(new Date(overlapStart));
+      const overlapDate = new Date(overlapStart);
       matches.push({
-        date,
+        date: formatDisplayLocalDate(overlapDate),
+        sort_date: formatSortableLocalDate(overlapDate),
         port: windowA.port,
         match_type: "Port match",
         match_key: "port_match",
@@ -505,7 +507,7 @@ function buildSummary(roster) {
     off_days: roster.offDays.length,
     resolved_patterns: roster.portWindows.length,
     unresolved_duties: roster.unresolvedDuties.map((entry) => ({
-      date: formatIsoLocalDate(entry.date),
+      date: formatDisplayLocalDate(entry.date),
       duty_code: entry.dutyCode,
     })),
     preview: roster.preview,
@@ -537,10 +539,16 @@ function buildDateParts(date) {
   return { day, month, hours, minutes };
 }
 
-function formatIsoLocalDate(date) {
+function formatSortableLocalDate(date) {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function formatDisplayLocalDate(date) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${date.getFullYear()}`;
 }
 
 function formatWindow(start, end) {

@@ -5,8 +5,9 @@ Browser-only web app for comparing two crew roster text files.
 ## Current Scope
 
 - Upload one TXT roster for each crew member
-- Works directly in Safari on iPhone and iPad
-- Runs entirely in the browser with no server dependency
+- Works directly in desktop browsers plus Safari on iPhone and iPad
+- Installable PWA with an offline app shell
+- Saves the last loaded rosters, filter, and threshold locally on the device
 - Compares shared days off: `A`, `X`, `AL`, `GL`, `LSL`
 - Compares same-port shared time using a configurable hours-in-port threshold
 - Marks unresolved duties as uncertain

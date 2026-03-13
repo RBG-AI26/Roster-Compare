@@ -139,6 +139,18 @@ li {
   margin: 24px 0;
 }
 
+.action-buttons,
+.action-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.action-copy {
+  flex: 1 1 320px;
+}
+
 .control-card {
   display: grid;
   gap: 8px;
@@ -180,6 +192,13 @@ button {
   box-shadow: 0 18px 40px rgba(10, 77, 66, 0.22);
 }
 
+.secondary-button {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 108, 92, 0.16);
+  color: var(--accent-strong);
+  box-shadow: none;
+}
+
 button:disabled {
   cursor: progress;
   opacity: 0.7;
@@ -192,6 +211,12 @@ button:disabled {
 .summary-card h3 {
   margin: 0 0 8px;
   font-size: 1.35rem;
+}
+
+.install-hint {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--muted);
 }
 
 .results-head {
@@ -306,6 +331,11 @@ tbody tr.home-match-row {
     align-items: flex-start;
   }
 
+  .action-buttons,
+  .action-copy {
+    width: 100%;
+  }
+
   .control-card {
     width: 100%;
   }
@@ -332,7 +362,12 @@ tbody tr.home-match-row {
   }
 
   button,
-  .control-card {
+  .control-card,
+  .action-buttons {
     width: 100%;
+  }
+
+  .action-buttons {
+    display: grid;
   }
 }

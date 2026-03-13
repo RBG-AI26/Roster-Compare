@@ -3,13 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Compare two crew roster text files locally on your device, with offline access and saved state."
+    />
     <meta name="theme-color" content="#f3eee2" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Roster Compare" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Roster Compare</title>
     <link rel="manifest" href="./manifest.json" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -46,8 +52,15 @@
           <span>Port match window (hours)</span>
           <input id="min-overlap-hours" name="min_overlap_hours" type="number" min="1" max="24" step="1" value="1" />
         </label>
-        <button id="compare-button" type="submit" form="compare-form">Compare rosters</button>
-        <p id="status" class="status">Choose two text files to begin.</p>
+        <div class="action-buttons">
+          <button id="compare-button" type="submit" form="compare-form">Compare rosters</button>
+          <button id="install-button" type="button" class="secondary-button" hidden>Install app</button>
+          <button id="clear-storage-button" type="button" class="secondary-button">Clear saved data</button>
+        </div>
+        <div class="action-copy">
+          <p id="status" class="status">Choose two text files to begin.</p>
+          <p class="install-hint">Works offline after the first load. On iPhone or iPad, use Share -> Add to Home Screen.</p>
+        </div>
       </section>
 
       <section id="results" class="results hidden">
@@ -73,10 +86,10 @@
                   <th>Date</th>
                   <th>Port</th>
                   <th>Match Type</th>
-                  <th>Crew A</th>
-                  <th>Crew B</th>
-                  <th>Crew A Window</th>
-                  <th>Crew B Window</th>
+                  <th id="results-crew-a-header">Crew A</th>
+                  <th id="results-crew-a-window-header">Crew A Window</th>
+                  <th id="results-crew-b-header">Crew B</th>
+                  <th id="results-crew-b-window-header">Crew B Window</th>
                 </tr>
               </thead>
               <tbody id="results-body"></tbody>
