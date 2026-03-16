@@ -50,13 +50,13 @@ export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, o
 
 export function parseRosterText(fileName, rawText) {
   const text = normalizeText(rawText);
+  const source = detectSource(fileName, text);
   const metadata = {
-    crewName:
-      matchGroup(text, /Name\s*:\s*([A-Z][A-Z\s'\-]+?)(?=\s{2,}[A-Za-z][A-Za-z ]*:\s|$)/m) || "Unknown",
+    crewName: extractCrewName(text, source) || "Unknown",
     staffNumber: matchGroup(text, /Staff No:\s*(\d+)/m),
     base: matchGroup(text, /Base\s*:\s*([A-Z]{3})/m),
     bidPeriod: matchGroup(text, /Bid Period\s+(\d+)/im),
-    source: detectSource(fileName, text),
+    source,
     generationDate: extractGenerationDate(text),
   };
 
@@ -138,6 +138,7 @@ function buildRosterRecord({
 }) {
   return {
     crewName: crewName.replace(/\s+/g, " ").trim(),
+    displayName: buildDisplayName(crewName, source),
     staffNumber,
     base,
     bidPeriod,
@@ -505,6 +506,36 @@ function detectSource(fileName, text) {
     return "arms";
   }
   return "text";
+}
+
+function extractCrewName(text, source) {
+  if (source === "webcis-short-haul") {
+    return matchGroup(text, /Name\s*:\s*([A-Z][A-Z\s'\-]+?)(?=\s{2,}Category\s*:|$)/m);
+  }
+
+  return (
+    matchGroup(text, /Name:\s*([A-Z][A-Z\s'\-]+?)(?=\s{2,}Staff No:|$)/m) ||
+    matchGroup(text, /Name\s*:\s*([A-Z][A-Z\s'\-]+?)(?=\s{2,}Category\s*:|$)/m)
+  );
+}
+
+function buildDisplayName(crewName, source) {
+  const normalized = String(crewName || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "Unknown";
+  }
+  if (source === "webcis-short-haul") {
+    return normalized;
+  }
+
+  const parts = normalized.split(/\s+/);
+  return formatPersonName(parts[parts.length - 1] || normalized);
+}
+
+function formatPersonName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/(^|[\s'-])([a-z])/g, (match, prefix, letter) => `${prefix}${letter.toUpperCase()}`);
 }
 
 function matchGroup(text, regex) {
@@ -924,6 +955,7 @@ function dedupeMatches(matches) {
 function buildSummary(roster) {
   return {
     crew_name: roster.crewName,
+    display_name: roster.displayName,
     staff_number: roster.staffNumber,
     base: roster.base,
     bid_period: roster.bidPeriod,

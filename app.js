@@ -248,7 +248,7 @@ function renderSummary(target, label, summary) {
 
   target.innerHTML = `
     <p class="eyebrow">${label}</p>
-    <h3>${escapeHtml(summary.crew_name)}</h3>
+    <h3>${escapeHtml(summary.display_name || summary.crew_name)}</h3>
     <ul class="summary-meta">
       <li>Staff number: ${escapeHtml(summary.staff_number || "Unknown")}</li>
       <li>Base: ${escapeHtml(summary.base || "Unknown")}</li>
@@ -262,6 +262,7 @@ function renderSummary(target, label, summary) {
 function emptySummary() {
   return {
     crew_name: "No roster loaded",
+    display_name: "No roster loaded",
     staff_number: null,
     base: null,
     bid_period: null,
@@ -283,22 +284,13 @@ function updateActiveFilterButton() {
 }
 
 function updateResultsTableHeaders(crewA, crewB) {
-  const crewAFirstName = getFirstName(crewA.crew_name) || "Crew A";
-  const crewBFirstName = getFirstName(crewB.crew_name) || "Crew B";
+  const crewALabel = crewA.display_name || crewA.crew_name || "Crew A";
+  const crewBLabel = crewB.display_name || crewB.crew_name || "Crew B";
 
-  resultsCrewAHeader.textContent = crewAFirstName;
+  resultsCrewAHeader.textContent = crewALabel;
   resultsCrewAWindowHeader.textContent = "Window";
-  resultsCrewBHeader.textContent = crewBFirstName;
+  resultsCrewBHeader.textContent = crewBLabel;
   resultsCrewBWindowHeader.textContent = "Window";
-}
-
-function getFirstName(fullName) {
-  if (!fullName || fullName === "No roster loaded") {
-    return "";
-  }
-
-  const parts = fullName.trim().split(/\s+/);
-  return parts[parts.length - 1] || "";
 }
 
 function loadPersistedState() {
