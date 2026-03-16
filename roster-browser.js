@@ -15,6 +15,7 @@ const DEFAULT_PORT_MATCH_WINDOW_MS = 60 * 60 * 1000;
 const MATCH_SORT_ORDER = new Map([
   ["port_match", 0],
   ["shared_day_off", 1],
+  ["reserve_at_base", 2],
 ]);
 
 export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, options = {}) {
@@ -23,6 +24,7 @@ export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, o
   const portMatchWindowMs = Math.max(1, Number(options.minPortOverlapHours || 1)) * 60 * 60 * 1000;
   const matches = [
     ...compareDaysOff(rosterA, rosterB),
+    ...compareReserveDays(rosterA, rosterB),
     ...comparePortMatches(rosterA, rosterB, portMatchWindowMs),
   ].sort((left, right) => {
     const prioritySort = (MATCH_SORT_ORDER.get(left.match_key) ?? 99) - (MATCH_SORT_ORDER.get(right.match_key) ?? 99);
@@ -88,6 +90,7 @@ function parseLongHaulRoster(fileName, text, metadata) {
     calendar,
     patterns,
     offDays,
+    reserveDays: [],
     portWindows,
     unresolvedDuties,
     preview: text.split("\n").slice(0, 20).join("\n"),
@@ -103,6 +106,7 @@ function parseShortHaulRoster(fileName, text, metadata) {
   }
 
   const offDays = calendar.filter((entry) => isShortHaulOffDay(entry.dutyCode));
+  const reserveDays = calendar.filter((entry) => isShortHaulReserveDuty(entry.dutyCode));
   const portWindows = buildShortHaulPortWindows(calendar, detailData.blocks, metadata.base);
   const unresolvedDuties = buildShortHaulUnresolvedDuties(calendar, detailData.blocks);
 
@@ -116,6 +120,7 @@ function parseShortHaulRoster(fileName, text, metadata) {
     calendar,
     patterns: detailData.blocks,
     offDays,
+    reserveDays,
     portWindows,
     unresolvedDuties,
     preview: text.split("\n").slice(0, 20).join("\n"),
@@ -132,6 +137,7 @@ function buildRosterRecord({
   calendar,
   patterns,
   offDays,
+  reserveDays = [],
   portWindows,
   unresolvedDuties,
   preview,
@@ -147,6 +153,7 @@ function buildRosterRecord({
     calendar,
     patterns,
     offDays,
+    reserveDays,
     portWindows,
     unresolvedDuties,
     coverageStart: calendar.length ? calendar[0].date : null,
@@ -905,6 +912,60 @@ function compareDaysOff(rosterA, rosterB) {
   return matches;
 }
 
+function compareReserveDays(rosterA, rosterB) {
+  const matches = [];
+  const offDaysByDateA = new Map(rosterA.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
+  const offDaysByDateB = new Map(rosterB.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
+
+  for (const reserveEntry of rosterA.reserveDays || []) {
+    const key = formatSortableLocalDate(reserveEntry.date);
+    const offDayEntry = offDaysByDateB.get(key);
+    if (!offDayEntry || !reserveEntry.report || !reserveEntry.end) {
+      continue;
+    }
+
+    const reserveWindow = buildReserveWindow(reserveEntry);
+    matches.push({
+      date: formatDisplayLocalDate(reserveEntry.date),
+      sort_date: key,
+      port: formatHomePort(rosterA.base, rosterB.base),
+      match_type: "Reserve at base",
+      match_key: "reserve_at_base",
+      overlap_window: formatWindow(reserveWindow.start, reserveWindow.end),
+      crew_a: `${reserveEntry.dutyCode} (${rosterA.base || "base unknown"})`,
+      crew_b: `${offDayEntry.dutyCode} (${rosterB.base || "base unknown"})`,
+      window_a: formatWindow(reserveWindow.start, reserveWindow.end),
+      window_b: "All day",
+      visual_group: "home_match",
+    });
+  }
+
+  for (const reserveEntry of rosterB.reserveDays || []) {
+    const key = formatSortableLocalDate(reserveEntry.date);
+    const offDayEntry = offDaysByDateA.get(key);
+    if (!offDayEntry || !reserveEntry.report || !reserveEntry.end) {
+      continue;
+    }
+
+    const reserveWindow = buildReserveWindow(reserveEntry);
+    matches.push({
+      date: formatDisplayLocalDate(reserveEntry.date),
+      sort_date: key,
+      port: formatHomePort(rosterA.base, rosterB.base),
+      match_type: "Reserve at base",
+      match_key: "reserve_at_base",
+      overlap_window: formatWindow(reserveWindow.start, reserveWindow.end),
+      crew_a: `${offDayEntry.dutyCode} (${rosterA.base || "base unknown"})`,
+      crew_b: `${reserveEntry.dutyCode} (${rosterB.base || "base unknown"})`,
+      window_a: "All day",
+      window_b: formatWindow(reserveWindow.start, reserveWindow.end),
+      visual_group: "home_match",
+    });
+  }
+
+  return dedupeMatches(matches);
+}
+
 function comparePortMatches(rosterA, rosterB, portMatchWindowMs = DEFAULT_PORT_MATCH_WINDOW_MS) {
   const matches = [];
 
@@ -1004,6 +1065,15 @@ function buildNotes(rosterA, rosterB) {
   return notes;
 }
 
+function buildReserveWindow(entry) {
+  const start = combineDateTime(entry.date, entry.report);
+  let end = combineDateTime(entry.date, entry.end);
+  if (end < start) {
+    end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return { start, end };
+}
+
 function buildDateParts(date) {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -1028,6 +1098,10 @@ function formatWindow(start, end) {
   const startParts = buildDateParts(start);
   const endParts = buildDateParts(end);
   return `${startParts.day}/${startParts.month} ${startParts.hours}:${startParts.minutes} to ${endParts.day}/${endParts.month} ${endParts.hours}:${endParts.minutes}`;
+}
+
+function formatHomePort(baseA, baseB) {
+  return baseA && baseA === baseB ? baseA : `${baseA || "?"} / ${baseB || "?"}`;
 }
 
 function formatCoverageRange(roster) {
