@@ -25,10 +25,41 @@ let currentInputs = null;
 let currentPayload = null;
 let activeFilter = "all";
 let deferredInstallPrompt = null;
+let pendingReloadForServiceWorker = false;
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+    navigator.serviceWorker
+      .register("./service-worker.js")
+      .then((registration) => {
+        registration.update().catch(() => {});
+
+        if (registration.waiting) {
+          pendingReloadForServiceWorker = true;
+          registration.waiting.postMessage({ type: "SKIP_WAITING" });
+        }
+
+        registration.addEventListener("updatefound", () => {
+          const installingWorker = registration.installing;
+          if (!installingWorker) {
+            return;
+          }
+          installingWorker.addEventListener("statechange", () => {
+            if (installingWorker.state === "installed" && navigator.serviceWorker.controller) {
+              pendingReloadForServiceWorker = true;
+            }
+          });
+        });
+      })
+      .catch(() => {});
+  });
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!pendingReloadForServiceWorker) {
+      return;
+    }
+    pendingReloadForServiceWorker = false;
+    window.location.reload();
   });
 }
 

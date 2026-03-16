@@ -1,5 +1,5 @@
 const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "AL", "GL", "LSL"]);
-const SHORT_HAUL_OFF_DUTY_CODES = new Set(["D/O", "LA"]);
+const SHORT_HAUL_OFF_DUTY_CODES = new Set(["D/O", "LA", "A/V"]);
 const SHORT_HAUL_RESERVE_DUTY_REGEX = /^R[A-Z0-9]*$/i;
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_CODES = new Map([
