@@ -9,7 +9,7 @@ Browser-only web app for comparing two crew roster text files.
 - Installable PWA with an offline app shell
 - Saves the last loaded rosters, filter, and threshold locally on the device
 - Compares shared days off: `A`, `X`, `AL`, `GL`, `LSL`
-- Compares same-port shared time using a configurable hours-in-port threshold
+- Compares same-port shared time using a configurable minutes-in-port threshold
 - Marks unresolved duties as uncertain
 
 PDF support is intentionally out of scope for this version.

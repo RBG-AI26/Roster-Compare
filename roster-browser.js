@@ -21,7 +21,10 @@ const MATCH_SORT_ORDER = new Map([
 export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, options = {}) {
   const rosterA = parseRosterText(crewAFile, crewAText);
   const rosterB = parseRosterText(crewBFile, crewBText);
-  const portMatchWindowMs = Math.max(1, Number(options.minPortOverlapHours || 1)) * 60 * 60 * 1000;
+  const portMatchWindowMs =
+    options.minPortOverlapMinutes != null
+      ? Math.max(1, Number(options.minPortOverlapMinutes || 60)) * 60 * 1000
+      : Math.max(1, Number(options.minPortOverlapHours || 1)) * 60 * 60 * 1000;
   const matches = [
     ...compareDaysOff(rosterA, rosterB),
     ...compareReserveDays(rosterA, rosterB),

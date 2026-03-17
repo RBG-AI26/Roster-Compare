@@ -7,7 +7,7 @@ const form = document.getElementById("compare-form");
 const compareButton = document.getElementById("compare-button");
 const installButton = document.getElementById("install-button");
 const clearStorageButton = document.getElementById("clear-storage-button");
-const minOverlapInput = document.getElementById("min-overlap-hours");
+const minOverlapInput = document.getElementById("min-overlap-minutes");
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
 const resultsBody = document.getElementById("results-body");
@@ -115,7 +115,7 @@ clearStorageButton.addEventListener("click", () => {
   currentPayload = null;
   activeFilter = "all";
   form.reset();
-  minOverlapInput.value = "1";
+  minOverlapInput.value = "60";
   resultsEl.classList.add("hidden");
   resultsBody.innerHTML = "";
   notesEl.innerHTML = "";
@@ -170,7 +170,7 @@ function rerunComparison() {
       currentInputs.crewAText,
       currentInputs.crewBFileName,
       currentInputs.crewBText,
-      { minPortOverlapHours: Number(minOverlapInput.value || 1) }
+      { minPortOverlapMinutes: Number(minOverlapInput.value || 60) }
     );
     currentPayload = payload;
     renderResults(payload);
@@ -308,7 +308,7 @@ function persistState() {
       STORAGE_KEY,
       JSON.stringify({
         activeFilter,
-        minOverlapHours: Number(minOverlapInput.value || 1),
+        minOverlapMinutes: Number(minOverlapInput.value || 60),
         currentInputs,
       })
     );
@@ -331,9 +331,14 @@ function restorePersistedState() {
     return;
   }
 
-  const minOverlapHours = Number(savedState.minOverlapHours);
-  if (Number.isFinite(minOverlapHours) && minOverlapHours >= 1 && minOverlapHours <= 24) {
-    minOverlapInput.value = String(minOverlapHours);
+  const minOverlapMinutes =
+    savedState.minOverlapMinutes != null
+      ? Number(savedState.minOverlapMinutes)
+      : savedState.minOverlapHours != null
+        ? Number(savedState.minOverlapHours) * 60
+        : null;
+  if (Number.isFinite(minOverlapMinutes) && minOverlapMinutes >= 1) {
+    minOverlapInput.value = String(minOverlapMinutes);
   }
 
   if (VALID_FILTERS.has(savedState.activeFilter)) {
