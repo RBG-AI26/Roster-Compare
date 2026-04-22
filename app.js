@@ -1,4 +1,4 @@
-import { compareRosterTexts } from "./roster-browser.js";
+import { compareRosterGroupTexts } from "./roster-browser.js";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const VALID_FILTERS = new Set(["all", "port_match", "shared_day_off"]);
@@ -10,14 +10,10 @@ const clearStorageButton = document.getElementById("clear-storage-button");
 const minOverlapInput = document.getElementById("min-overlap-minutes");
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
+const resultsHead = document.getElementById("results-head");
 const resultsBody = document.getElementById("results-body");
-const resultsCrewAHeader = document.getElementById("results-crew-a-header");
-const resultsCrewAWindowHeader = document.getElementById("results-crew-a-window-header");
-const resultsCrewBHeader = document.getElementById("results-crew-b-header");
-const resultsCrewBWindowHeader = document.getElementById("results-crew-b-window-header");
 const notesEl = document.getElementById("notes");
-const summaryA = document.getElementById("summary-a");
-const summaryB = document.getElementById("summary-b");
+const summaryRow = document.getElementById("summary-row");
 const filterBar = document.getElementById("match-filters");
 const fileInputs = Array.from(form.querySelectorAll('input[type="file"]'));
 
@@ -117,11 +113,11 @@ clearStorageButton.addEventListener("click", () => {
   form.reset();
   minOverlapInput.value = "60";
   resultsEl.classList.add("hidden");
+  resultsHead.innerHTML = "";
   resultsBody.innerHTML = "";
   notesEl.innerHTML = "";
-  renderSummary(summaryA, "Crew A", emptySummary());
-  renderSummary(summaryB, "Crew B", emptySummary());
-  updateResultsTableHeaders(emptySummary(), emptySummary());
+  renderSummaries([emptySummary("Crew A"), emptySummary("Crew B"), emptySummary("Crew C")]);
+  updateResultsTableHeaders([emptySummary("Crew A"), emptySummary("Crew B")]);
   for (const input of fileInputs) {
     renderFileList(input);
   }
@@ -134,21 +130,25 @@ form.addEventListener("submit", async (event) => {
 
   const crewAFile = form.elements.crew_a.files[0];
   const crewBFile = form.elements.crew_b.files[0];
+  const crewCFile = form.elements.crew_c.files[0];
   if (!crewAFile || !crewBFile) {
     statusEl.textContent = "Choose one text roster for each crew member.";
     return;
   }
 
   compareButton.disabled = true;
-  statusEl.textContent = "Reading rosters and comparing port matches...";
+  statusEl.textContent = crewCFile
+    ? "Reading 3 rosters and comparing shared overlap..."
+    : "Reading rosters and comparing port matches...";
 
   try {
-    const [crewAText, crewBText] = await Promise.all([crewAFile.text(), crewBFile.text()]);
+    const rosterFiles = [crewAFile, crewBFile, crewCFile].filter(Boolean);
+    const rosterTexts = await Promise.all(rosterFiles.map((file) => file.text()));
     currentInputs = {
-      crewAFileName: crewAFile.name,
-      crewAText,
-      crewBFileName: crewBFile.name,
-      crewBText,
+      rosters: rosterFiles.map((file, index) => ({
+        fileName: file.name,
+        text: rosterTexts[index],
+      })),
     };
     rerunComparison();
   } catch (error) {
@@ -165,13 +165,9 @@ function rerunComparison() {
   }
 
   try {
-    const payload = compareRosterTexts(
-      currentInputs.crewAFileName,
-      currentInputs.crewAText,
-      currentInputs.crewBFileName,
-      currentInputs.crewBText,
-      { minPortOverlapMinutes: Number(minOverlapInput.value || 60) }
-    );
+    const payload = compareRosterGroupTexts(currentInputs.rosters, {
+      minPortOverlapMinutes: Number(minOverlapInput.value || 60),
+    });
     currentPayload = payload;
     renderResults(payload);
     persistState();
@@ -192,28 +188,33 @@ function renderFileList(input) {
 
 function renderResults(payload) {
   resultsEl.classList.remove("hidden");
-  renderSummary(summaryA, "Crew A", payload.crew_a);
-  renderSummary(summaryB, "Crew B", payload.crew_b);
-  updateResultsTableHeaders(payload.crew_a, payload.crew_b);
+  renderSummaries(payload.crews);
+  updateResultsTableHeaders(payload.crews);
 
   const filteredMatches = payload.matches.filter((match) => activeFilter === "all" || match.match_key === activeFilter);
   resultsBody.innerHTML = "";
   if (!filteredMatches.length) {
-    resultsBody.innerHTML = '<tr><td colspan="8" class="empty-state">No matches found under the current rules.</td></tr>';
+    resultsBody.innerHTML = `<tr><td colspan="${4 + payload.crews.length * 2}" class="empty-state">No matches found under the current rules.</td></tr>`;
   }
 
   for (const match of filteredMatches) {
     const row = document.createElement("tr");
     row.className = match.visual_group === "away_port" ? "away-port-row" : "home-match-row";
+    const participantCells = match.participants
+      .map(
+        (participant) => `
+          <td>${escapeHtml(participant.label)}</td>
+          <td>${escapeHtml(participant.window)}</td>
+        `
+      )
+      .join("");
+
     row.innerHTML = `
       <td>${escapeHtml(match.date)}</td>
       <td>${escapeHtml(match.port)}</td>
       <td>${escapeHtml(match.match_type)}</td>
       <td>${escapeHtml(match.overlap_window)}</td>
-      <td>${escapeHtml(match.crew_a)}</td>
-      <td>${escapeHtml(match.window_a)}</td>
-      <td>${escapeHtml(match.crew_b)}</td>
-      <td>${escapeHtml(match.window_b)}</td>
+      ${participantCells}
     `;
     resultsBody.appendChild(row);
   }
@@ -228,7 +229,12 @@ function renderResults(payload) {
   statusEl.textContent = `Comparison complete. ${filteredMatches.length} displayed match(es) of ${payload.matches.length} total.`;
 }
 
-function renderSummary(target, label, summary) {
+function renderSummaries(crews) {
+  summaryRow.innerHTML = crews.map((summary, index) => renderSummaryCard(index, summary)).join("");
+}
+
+function renderSummaryCard(index, summary) {
+  const label = `Crew ${String.fromCharCode(65 + index)}`;
   const uncertainMarkup = summary.unresolved_duties.length
     ? `
       <ul class="uncertain-list">
@@ -246,7 +252,8 @@ function renderSummary(target, label, summary) {
     `
     : `<p class="empty-state">No uncertain duties.</p>`;
 
-  target.innerHTML = `
+  return `
+    <article class="summary-card">
     <p class="eyebrow">${label}</p>
     <h3>${escapeHtml(summary.display_name || summary.crew_name)}</h3>
     <ul class="summary-meta">
@@ -256,13 +263,14 @@ function renderSummary(target, label, summary) {
       <li>Uncertain duties: ${escapeHtml(String(summary.unresolved_duties.length))}</li>
     </ul>
     ${uncertainMarkup}
+    </article>
   `;
 }
 
-function emptySummary() {
+function emptySummary(label = "No roster loaded") {
   return {
-    crew_name: "No roster loaded",
-    display_name: "No roster loaded",
+    crew_name: label,
+    display_name: label,
     staff_number: null,
     base: null,
     bid_period: null,
@@ -283,14 +291,23 @@ function updateActiveFilterButton() {
   }
 }
 
-function updateResultsTableHeaders(crewA, crewB) {
-  const crewALabel = crewA.display_name || crewA.crew_name || "Crew A";
-  const crewBLabel = crewB.display_name || crewB.crew_name || "Crew B";
+function updateResultsTableHeaders(crews) {
+  const participantHeaders = crews
+    .map((crew) => {
+      const label = crew.display_name || crew.crew_name || "Crew";
+      return `<th>${escapeHtml(label)}</th><th>Window</th>`;
+    })
+    .join("");
 
-  resultsCrewAHeader.textContent = crewALabel;
-  resultsCrewAWindowHeader.textContent = "Window";
-  resultsCrewBHeader.textContent = crewBLabel;
-  resultsCrewBWindowHeader.textContent = "Window";
+  resultsHead.innerHTML = `
+    <tr>
+      <th>Date</th>
+      <th>Port</th>
+      <th>Match Type</th>
+      <th>Overlap</th>
+      ${participantHeaders}
+    </tr>
+  `;
 }
 
 function loadPersistedState() {
@@ -350,14 +367,12 @@ function restorePersistedState() {
   }
 
   currentInputs = savedState.currentInputs;
-  renderFileListMessage(
-    document.querySelector('[data-file-list="crew_a"]'),
-    `${currentInputs.crewAFileName} (saved on this device)`
-  );
-  renderFileListMessage(
-    document.querySelector('[data-file-list="crew_b"]'),
-    `${currentInputs.crewBFileName} (saved on this device)`
-  );
+  currentInputs.rosters.forEach((roster, index) => {
+    renderFileListMessage(
+      document.querySelector(`[data-file-list="crew_${String.fromCharCode(97 + index)}"]`),
+      `${roster.fileName} (saved on this device)`
+    );
+  });
   rerunComparison();
   if (currentPayload) {
     statusEl.textContent = `Restored saved comparison from this device. ${statusEl.textContent}`;
@@ -367,10 +382,10 @@ function restorePersistedState() {
 function isPersistedInputs(value) {
   return Boolean(
     value &&
-      typeof value.crewAFileName === "string" &&
-      typeof value.crewAText === "string" &&
-      typeof value.crewBFileName === "string" &&
-      typeof value.crewBText === "string"
+      Array.isArray(value.rosters) &&
+      value.rosters.length >= 2 &&
+      value.rosters.length <= 3 &&
+      value.rosters.every((roster) => typeof roster.fileName === "string" && typeof roster.text === "string")
   );
 }
 
@@ -387,8 +402,7 @@ for (const input of fileInputs) {
   renderFileList(input);
 }
 
-renderSummary(summaryA, "Crew A", emptySummary());
-renderSummary(summaryB, "Crew B", emptySummary());
-updateResultsTableHeaders(emptySummary(), emptySummary());
+renderSummaries([emptySummary("Crew A"), emptySummary("Crew B"), emptySummary("Crew C")]);
+updateResultsTableHeaders([emptySummary("Crew A"), emptySummary("Crew B")]);
 updateActiveFilterButton();
 restorePersistedState();

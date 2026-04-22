@@ -22,7 +22,7 @@
     <main class="shell">
       <section class="hero">
         <p class="eyebrow">Roster Compare</p>
-        <h1>Open two text rosters and compare.</h1>
+        <h1>Open two or three text rosters and compare.</h1>
       </section>
 
       <form id="compare-form" class="panel-grid">
@@ -45,6 +45,16 @@
           </label>
           <ul class="file-list" data-file-list="crew_b"></ul>
         </section>
+
+        <section class="panel">
+          <h2>Crew C</h2>
+          <p class="panel-copy">Optional: add a third roster for true 3-way overlap comparison.</p>
+          <label class="dropzone">
+            <span>Choose roster text file</span>
+            <input type="file" name="crew_c" accept=".txt,text/plain" />
+          </label>
+          <ul class="file-list" data-file-list="crew_c"></ul>
+        </section>
       </form>
 
       <section class="actions">
@@ -58,16 +68,13 @@
           <button id="clear-storage-button" type="button" class="secondary-button">Clear saved data</button>
         </div>
         <div class="action-copy">
-          <p id="status" class="status">Choose two text files to begin.</p>
+          <p id="status" class="status">Choose at least two text files to begin.</p>
           <p class="install-hint">Works offline after the first load. On iPhone or iPad, use Share -> Add to Home Screen.</p>
         </div>
       </section>
 
       <section id="results" class="results hidden">
-        <div class="summary-row">
-          <article class="summary-card" id="summary-a"></article>
-          <article class="summary-card" id="summary-b"></article>
-        </div>
+        <div class="summary-row" id="summary-row"></div>
 
         <article class="results-card">
           <div class="results-head">
@@ -81,18 +88,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Port</th>
-                  <th>Match Type</th>
-                  <th>Overlap</th>
-                  <th id="results-crew-a-header">Crew A</th>
-                  <th id="results-crew-a-window-header">Crew A Window</th>
-                  <th id="results-crew-b-header">Crew B</th>
-                  <th id="results-crew-b-window-header">Crew B Window</th>
-                </tr>
-              </thead>
+              <thead id="results-head"></thead>
               <tbody id="results-body"></tbody>
             </table>
           </div>

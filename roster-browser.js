@@ -18,18 +18,22 @@ const MATCH_SORT_ORDER = new Map([
   ["reserve_at_base", 2],
 ]);
 
-export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, options = {}) {
-  const rosterA = parseRosterText(crewAFile, crewAText);
-  const rosterB = parseRosterText(crewBFile, crewBText);
+export function compareRosterGroupTexts(rosterInputs, options = {}) {
+  if (!Array.isArray(rosterInputs) || rosterInputs.length < 2 || rosterInputs.length > 3) {
+    throw new Error("Comparison supports 2 or 3 rosters.");
+  }
+
+  const rosters = rosterInputs.map((rosterInput) => parseRosterText(rosterInput.fileName, rosterInput.text));
   const portMatchWindowMs =
     options.minPortOverlapMinutes != null
       ? Math.max(1, Number(options.minPortOverlapMinutes || 60)) * 60 * 1000
       : Math.max(1, Number(options.minPortOverlapHours || 1)) * 60 * 60 * 1000;
-  const matches = [
-    ...compareDaysOff(rosterA, rosterB),
-    ...compareReserveDays(rosterA, rosterB),
-    ...comparePortMatches(rosterA, rosterB, portMatchWindowMs),
-  ].sort((left, right) => {
+
+  const matches = (
+    rosters.length === 2
+      ? buildTwoRosterMatches(rosters[0], rosters[1], portMatchWindowMs)
+      : buildThreeRosterMatches(rosters, portMatchWindowMs)
+  ).sort((left, right) => {
     const prioritySort = (MATCH_SORT_ORDER.get(left.match_key) ?? 99) - (MATCH_SORT_ORDER.get(right.match_key) ?? 99);
     if (prioritySort !== 0) {
       return prioritySort;
@@ -46,11 +50,152 @@ export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, o
   });
 
   return {
-    crew_a: buildSummary(rosterA),
-    crew_b: buildSummary(rosterB),
+    crews: rosters.map((roster) => buildSummary(roster)),
     matches,
-    notes: buildNotes(rosterA, rosterB),
+    notes: buildGroupNotes(rosters),
   };
+}
+
+export function compareRosterTexts(crewAFile, crewAText, crewBFile, crewBText, options = {}) {
+  const payload = compareRosterGroupTexts(
+    [
+      { fileName: crewAFile, text: crewAText },
+      { fileName: crewBFile, text: crewBText },
+    ],
+    options
+  );
+
+  return {
+    crew_a: payload.crews[0],
+    crew_b: payload.crews[1],
+    matches: payload.matches.map(genericMatchToLegacyMatch),
+    notes: payload.notes,
+  };
+}
+
+function buildTwoRosterMatches(rosterA, rosterB, portMatchWindowMs) {
+  return dedupeMatches(
+    [
+      ...compareDaysOff(rosterA, rosterB),
+      ...compareReserveDays(rosterA, rosterB),
+      ...comparePortMatches(rosterA, rosterB, portMatchWindowMs),
+    ].map(legacyMatchToGenericMatch)
+  );
+}
+
+function buildThreeRosterMatches(rosters, portMatchWindowMs) {
+  return dedupeMatches([
+    ...compareThreeWayDaysOff(rosters),
+    ...compareThreeWayPortMatches(rosters, portMatchWindowMs),
+  ]);
+}
+
+function legacyMatchToGenericMatch(match) {
+  return {
+    date: match.date,
+    sort_date: match.sort_date,
+    port: match.port,
+    match_type: match.match_type,
+    match_key: match.match_key,
+    overlap_window: match.overlap_window,
+    participants: [
+      { label: match.crew_a, window: match.window_a },
+      { label: match.crew_b, window: match.window_b },
+    ],
+    visual_group: match.visual_group,
+  };
+}
+
+function genericMatchToLegacyMatch(match) {
+  return {
+    date: match.date,
+    sort_date: match.sort_date,
+    port: match.port,
+    match_type: match.match_type,
+    match_key: match.match_key,
+    overlap_window: match.overlap_window,
+    crew_a: match.participants[0]?.label || "",
+    window_a: match.participants[0]?.window || "",
+    crew_b: match.participants[1]?.label || "",
+    window_b: match.participants[1]?.window || "",
+    visual_group: match.visual_group,
+  };
+}
+
+function compareThreeWayDaysOff(rosters) {
+  const [rosterA, rosterB, rosterC] = rosters;
+  const daysOffByDateB = new Map(rosterB.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
+  const daysOffByDateC = new Map(rosterC.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
+  const matches = [];
+
+  for (const entryA of rosterA.offDays) {
+    const key = formatSortableLocalDate(entryA.date);
+    const entryB = daysOffByDateB.get(key);
+    const entryC = daysOffByDateC.get(key);
+    if (!entryB || !entryC) {
+      continue;
+    }
+
+    matches.push({
+      date: formatDisplayLocalDate(entryA.date),
+      sort_date: key,
+      port: formatCombinedPort(rosters.map((roster) => roster.base)),
+      match_type: "Shared day off",
+      match_key: "shared_day_off",
+      overlap_window: "All day",
+      participants: [
+        { label: `${entryA.dutyCode} (${rosterA.base || "base unknown"})`, window: "All day" },
+        { label: `${entryB.dutyCode} (${rosterB.base || "base unknown"})`, window: "All day" },
+        { label: `${entryC.dutyCode} (${rosterC.base || "base unknown"})`, window: "All day" },
+      ],
+      visual_group: "home_match",
+    });
+  }
+
+  return matches;
+}
+
+function compareThreeWayPortMatches(rosters, portMatchWindowMs) {
+  const [rosterA, rosterB, rosterC] = rosters;
+  const matches = [];
+
+  for (const windowA of rosterA.portWindows) {
+    for (const windowB of rosterB.portWindows) {
+      if (windowA.port !== windowB.port) {
+        continue;
+      }
+
+      for (const windowC of rosterC.portWindows) {
+        if (windowA.port !== windowC.port) {
+          continue;
+        }
+
+        const overlapStart = Math.max(windowA.start.getTime(), windowB.start.getTime(), windowC.start.getTime());
+        const overlapEnd = Math.min(windowA.end.getTime(), windowB.end.getTime(), windowC.end.getTime());
+        if (overlapEnd - overlapStart < portMatchWindowMs) {
+          continue;
+        }
+
+        const overlapDate = new Date(overlapStart);
+        matches.push({
+          date: formatDisplayLocalDate(overlapDate),
+          sort_date: formatSortableLocalDate(overlapDate),
+          port: windowA.port,
+          match_type: "Port match",
+          match_key: "port_match",
+          overlap_window: formatWindow(new Date(overlapStart), new Date(overlapEnd)),
+          participants: [
+            { label: windowA.dutyCode, window: formatWindow(windowA.start, windowA.end) },
+            { label: windowB.dutyCode, window: formatWindow(windowB.start, windowB.end) },
+            { label: windowC.dutyCode, window: formatWindow(windowC.start, windowC.end) },
+          ],
+          visual_group: "away_port",
+        });
+      }
+    }
+  }
+
+  return matches;
 }
 
 export function parseRosterText(fileName, rawText) {
@@ -1068,6 +1213,46 @@ function buildNotes(rosterA, rosterB) {
   return notes;
 }
 
+function buildGroupNotes(rosters) {
+  if (rosters.length === 2) {
+    return buildNotes(rosters[0], rosters[1]);
+  }
+
+  const notes = [];
+  for (const roster of rosters) {
+    if (roster.unresolvedDuties.length) {
+      notes.push(`${roster.crewName}: ${roster.unresolvedDuties.length} duty entries were treated as uncertain.`);
+    }
+  }
+
+  const bases = rosters.map((roster) => roster.base || "?");
+  if (new Set(bases).size > 1) {
+    notes.push(`Home bases differ (${bases.join(" vs ")}), so shared home-based availability may not mean the same physical port.`);
+  }
+
+  const overlapStart = Math.max(...rosters.map((roster) => roster.coverageStart?.getTime() || 0));
+  const overlapEnd = Math.min(...rosters.map((roster) => roster.coverageEnd?.getTime() || 0));
+  const ranges = rosters.map((roster) => formatCoverageRange(roster));
+  if (rosters.every((roster) => roster.coverageStart && roster.coverageEnd)) {
+    if (overlapStart > overlapEnd) {
+      notes.push(
+        `Roster date coverage does not overlap across all 3 rosters (${ranges.join(" vs ")}), so dates outside each roster's range are treated as unavailable.`
+      );
+    } else if (
+      new Set(rosters.map((roster) => `${roster.coverageStart.getTime()}-${roster.coverageEnd.getTime()}`)).size > 1
+    ) {
+      notes.push(
+        `Roster coverage differs (${ranges.join(" vs ")}). Dates outside a roster's range are treated as unavailable, which is expected when mixing short-haul and longer rosters.`
+      );
+    }
+  }
+
+  if (!notes.length) {
+    notes.push("No additional caveats.");
+  }
+  return notes;
+}
+
 function buildReserveWindow(entry) {
   const start = combineDateTime(entry.date, entry.report);
   let end = combineDateTime(entry.date, entry.end);
@@ -1105,6 +1290,10 @@ function formatWindow(start, end) {
 
 function formatHomePort(baseA, baseB) {
   return baseA && baseA === baseB ? baseA : `${baseA || "?"} / ${baseB || "?"}`;
+}
+
+function formatCombinedPort(ports) {
+  return new Set(ports.filter(Boolean)).size === 1 ? ports[0] : ports.map((port) => port || "?").join(" / ");
 }
 
 function formatCoverageRange(roster) {
