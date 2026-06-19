@@ -1,4 +1,4 @@
-const CACHE_NAME = "roster-compare-static-v3";
+const CACHE_NAME = "roster-compare-static-v4";
 const APP_ASSETS = [
   "./",
   "./index.html",

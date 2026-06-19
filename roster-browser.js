@@ -990,10 +990,11 @@ function instantiatePattern(anchorDate, pattern) {
 
   for (const flight of pattern.flights) {
     const departureDate = nextMatchingWeekday(cursorDate, flight.departureDay);
-    const arrivalDate = resolveArrivalDate(departureDate, flight.departureDay, flight.arrivalDay);
+    const arrivalDayDelta = weekdayDelta(flight.departureDay, flight.arrivalDay);
+    const arrivalDate = addDays(departureDate, arrivalDayDelta);
     const departureDateTime = combineDateTime(departureDate, flight.departureTime);
     let arrivalDateTime = combineDateTime(arrivalDate, flight.arrivalTime);
-    if (arrivalDateTime < departureDateTime) {
+    if (arrivalDayDelta > 0 && arrivalDateTime < departureDateTime) {
       arrivalDateTime = new Date(arrivalDateTime.getTime() + 24 * 60 * 60 * 1000);
     }
     instantiated.push({ departureDateTime, arrivalDateTime, flight });
@@ -1010,11 +1011,14 @@ function nextMatchingWeekday(startDate, targetDayCode) {
   return new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + delta);
 }
 
-function resolveArrivalDate(departureDate, departureDayCode, arrivalDayCode) {
+function weekdayDelta(departureDayCode, arrivalDayCode) {
   const departureWeekday = DAY_CODES.get(departureDayCode);
   const arrivalWeekday = DAY_CODES.get(arrivalDayCode);
-  const delta = (arrivalWeekday - departureWeekday + 7) % 7;
-  return new Date(departureDate.getFullYear(), departureDate.getMonth(), departureDate.getDate() + delta);
+  return (arrivalWeekday - departureWeekday + 7) % 7;
+}
+
+function addDays(date, days) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
 
 function combineDateTime(date, timeText) {
