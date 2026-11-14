@@ -18,6 +18,7 @@ function file(index) {
 function setup(saved) {
   const store = new Map(saved ? [[storageKey, JSON.stringify(saved)]] : []);
   const elements = new Map();
+  let comparisonCalls = 0;
   function element() {
     const classes = new Set();
     return { textContent: '', innerHTML: '', value: '60', disabled: false, children: [], events: {},
@@ -26,12 +27,12 @@ function setup(saved) {
       querySelectorAll: () => [], appendChild(child) { this.children.push(child); }, reset() {}, checkValidity: () => true, reportValidity: () => true,
     };
   }
-  const context = vm.createContext({ ...parser, console, Error, navigator: {}, window: { addEventListener() {} },
+  const context = vm.createContext({ ...parser, compareRosterGroup: (...args) => { comparisonCalls += 1; return parser.compareRosterGroup(...args); }, console, Error, navigator: {}, window: { addEventListener() {} },
     document: { getElementById(id) { assert.ok(html.includes(`id="${id}"`), `Missing HTML element ${id}`); if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }, createElement: element },
     localStorage: { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: k => store.delete(k) },
   });
   vm.runInContext(app, context);
-  return { context, elements, store, add: files => context.addRosterFiles(files),
+  return { context, elements, store, comparisonCalls: () => comparisonCalls, add: files => context.addRosterFiles(files),
     compare: () => elements.get('compare-form').events.submit({ preventDefault() {} }),
     select(index, checked) { elements.get('crew-list').events.change({ target: { closest: () => ({ dataset: { rosterIndex: String(index) }, checked }) } }); },
     remove(index) { elements.get('crew-list').events.click({ target: { closest: () => ({ dataset: { removeIndex: String(index) } }) } }); },
@@ -98,5 +99,29 @@ test('storage failure still permits in-memory upload and comparison', async () =
   const ui = setup();
   vm.runInContext('localStorage.setItem = () => { throw new Error("Storage unavailable"); }', ui.context);
   await ui.add([file(0), file(1)]); ui.compare();
+  assert.match(ui.elements.get('status').textContent, /Comparison complete/);
+});
+
+test('upload compares all subsets once and ticks display cached results without pressing compare', async () => {
+  const ui = setup();
+  await ui.add([0, 1, 2, 3, 4].map(file));
+  assert.match(ui.elements.get('status').textContent, /Comparison complete/);
+  assert.equal(ui.comparisonCalls(), 26);
+  ui.select(1, false); ui.select(2, false); ui.select(3, false);
+  assert.match(ui.elements.get('results-head').innerHTML, /<th>E<\/th>/);
+  assert.doesNotMatch(ui.elements.get('results-head').innerHTML, /<th>B<\/th>/);
+  ui.select(4, false);
+  assert.equal(ui.elements.get('results').classList.contains('hidden'), true);
+  ui.select(1, true);
+  assert.equal(ui.elements.get('results').classList.contains('hidden'), false);
+  assert.match(ui.elements.get('results-head').innerHTML, /<th>B<\/th>/);
+  assert.equal(ui.comparisonCalls(), 26);
+});
+test('adding another roster immediately replaces results with the new crew selection', async () => {
+  const ui = setup();
+  await ui.add([file(0), file(1)]);
+  assert.match(ui.elements.get('status').textContent, /Comparison complete/);
+  await ui.add([file(2)]);
+  assert.match(ui.elements.get('results-head').innerHTML, /<th>C<\/th>/);
   assert.match(ui.elements.get('status').textContent, /Comparison complete/);
 });

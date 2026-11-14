@@ -1,4 +1,4 @@
-import { compareRosterGroupTexts, parseRosterText } from "./roster-browser.js";
+import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261114-3";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const VALID_FILTERS = new Set(["all", "port_match", "shared_day_off"]);
@@ -26,6 +26,7 @@ const MAX_ROSTERS = 5;
 let loadedRosters = [];
 let isProcessing = false;
 let currentPayload = null;
+const comparisonCache = new Map();
 let activeFilter = "all";
 let deferredInstallPrompt = null;
 let pendingReloadForServiceWorker = false;
@@ -33,7 +34,7 @@ let pendingReloadForServiceWorker = false;
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register("./service-worker.js")
+      .register("./service-worker.js", { updateViaCache: "none" })
       .then((registration) => {
         registration.update().catch(() => {});
 
@@ -102,6 +103,8 @@ crewList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-remove-index]");
   if (!button || isProcessing) return;
   loadedRosters.splice(Number(button.dataset.removeIndex), 1);
+  comparisonCache.clear();
+  prepareComparisons();
   renderCrewList();
   updateSelection();
 });
@@ -139,6 +142,7 @@ clearStorageButton.addEventListener("click", () => {
   if (isProcessing) return;
   clearPersistedState();
   loadedRosters = [];
+  comparisonCache.clear();
   activeFilter = "all";
   form.reset();
   minOverlapInput.value = "60";
@@ -189,9 +193,12 @@ async function addRosterFiles(files) {
   fileInput.disabled = false;
   clearStorageButton.disabled = false;
   fileInput.value = "";
-  if (added) hideResults();
+  if (added) {
+    comparisonCache.clear();
+    prepareComparisons();
+  }
   renderCrewList();
-  if (currentPayload) renderResults(currentPayload);
+  rerunComparison();
   persistState();
   uploadStatus.textContent = [`${added} roster${added === 1 ? "" : "s"} added.`, ...messages].join(" ");
 }
@@ -210,11 +217,9 @@ function hideResults() {
 }
 
 function updateSelection() {
-  const shouldCompare = Boolean(currentPayload);
   persistState();
   updateRosterControls();
-  if (selectedRosters().length < 2) hideResults();
-  else if (shouldCompare) rerunComparison();
+  rerunComparison();
 }
 
 function updateRosterControls() {
@@ -224,7 +229,7 @@ function updateRosterControls() {
   compareButton.disabled = isProcessing || count < 2;
   if (isProcessing) statusEl.textContent = "Processing roster files…";
   else if (count < 2) statusEl.textContent = loadedRosters.length < 2 ? "Add at least two rosters to begin." : "Select at least two crew to compare.";
-  else if (!currentPayload) statusEl.textContent = `${count} crew selected. Ready to compare.`;
+  else if (!currentPayload) statusEl.textContent = `${count} crew selected. Updating comparison…`;
 }
 
 function renderCrewList() {
@@ -239,12 +244,23 @@ function renderCrewList() {
           <span class="crew-details">
             <strong>${escapeHtml(name)}</strong>
             <span>${escapeHtml([crew.staffNumber && `Staff ${crew.staffNumber}`, crew.base, crew.bidPeriod && `BP ${crew.bidPeriod}`].filter(Boolean).join(" · ") || "Crew details unavailable")}</span>
+            <span>${escapeHtml(crew.coverageStart.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }))} – ${escapeHtml(crew.coverageEnd.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }))}</span>
             <span class="crew-filename">${escapeHtml(roster.fileName)}</span>
           </span>
         </label>
         <button type="button" class="secondary-button remove-roster" data-remove-index="${index}" aria-label="Remove ${escapeHtml(name)}" ${isProcessing ? "disabled" : ""}>Remove</button>
       </div>`;
   }).join("") : '<p class="empty-state">Your crew will appear here after you add rosters.</p>';
+}
+
+function prepareComparisons() {
+  if (!minOverlapInput.checkValidity()) return;
+  const minutes = Number(minOverlapInput.value || 60);
+  for (let mask = 1; mask < (1 << loadedRosters.length); mask += 1) {
+    const rosters = loadedRosters.filter((_, index) => mask & (1 << index));
+    if (rosters.length < 2) continue;
+    comparisonCache.set(`${minutes}:${mask}`, compareRosterGroup(rosters.map((roster) => roster.parsed), { minPortOverlapMinutes: minutes }));
+  }
 }
 
 function rerunComparison() {
@@ -260,9 +276,13 @@ function rerunComparison() {
     return;
   }
   try {
-    const payload = compareRosterGroupTexts(rosters, {
-      minPortOverlapMinutes: Number(minOverlapInput.value || 60),
-    });
+    const minutes = Number(minOverlapInput.value || 60);
+    const mask = loadedRosters.reduce((value, roster, index) => value | (roster.selected ? 1 << index : 0), 0);
+    const key = `${minutes}:${mask}`;
+    if (!comparisonCache.has(key)) {
+      comparisonCache.set(key, compareRosterGroup(rosters.map((roster) => roster.parsed), { minPortOverlapMinutes: minutes }));
+    }
+    const payload = comparisonCache.get(key);
     currentPayload = payload;
     renderResults(payload);
     persistState();
@@ -346,6 +366,7 @@ function renderSummaryCard(index, summary) {
       <li>Staff number: ${escapeHtml(summary.staff_number || "Unknown")}</li>
       <li>Base: ${escapeHtml(summary.base || "Unknown")}</li>
       <li>Bid period: ${escapeHtml(summary.bid_period || "Unknown")}</li>
+      <li>Dates: ${escapeHtml(summary.coverage_start || "Unknown")} – ${escapeHtml(summary.coverage_end || "Unknown")}</li>
       <li>Uncertain duties: ${escapeHtml(String(summary.unresolved_duties.length))}</li>
     </ul>
     ${uncertainMarkup}
@@ -445,7 +466,8 @@ function restorePersistedState() {
     }
   }
   renderCrewList();
-  if (selectedRosters().length >= 2) rerunComparison();
+  prepareComparisons();
+  rerunComparison();
   if (currentPayload) {
     statusEl.textContent = `Restored saved rosters and crew selection. ${statusEl.textContent}`;
   }

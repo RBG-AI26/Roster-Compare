@@ -6,6 +6,8 @@ Browser-only web app for loading up to five crew roster text files and comparing
 
 - Add up to five TXT rosters through one multi-file picker or drag-and-drop area
 - Process files immediately and show crew names, staff numbers, bases and bid periods
+- Compare automatically on upload and retain results for every crew selection
+- Resolve short-haul calendar dates from printed period dates or matching dated flight details, checking weekdays and month/year rollovers
 - Select any two to five loaded crew for a comparison of overlap shared by everyone selected
 - Add or remove rosters without reloading the other files
 - Report unreadable files individually and skip duplicate roster contents
@@ -20,7 +22,7 @@ PDF support is intentionally out of scope for this version. Two-crew comparisons
 
 ## Use
 
-Open the hosted web app, add up to five text rosters, select the crew you want to compare and tap `Compare rosters`. Changing the selected crew refreshes an existing comparison. Uploading more files hides old results until you compare again. At least two selected crew are required.
+Open the hosted web app and add up to five text rosters. The app parses them once, prepares and retains comparisons for every crew selection, and displays the selected crew immediately. Tick or untick crew to switch results without pressing `Compare rosters`. Results also update when files are added or removed. At least two selected crew are required; reducing the selection below two hides results but retains the comparisons for the next valid selection.
 
 If you want to run it locally without deploying, serve the repository as a static site with any simple file server.
 
@@ -46,3 +48,5 @@ This repo now includes a root `index.html`, so it can be hosted directly as a st
 ## Validation
 
 Run `node --test tests/*.test.mjs` for comparison and upload/state regression checks. Upload/state checks use a small DOM adapter; they do not replace browser layout and interaction checks.
+
+Application scripts and styles use matching release URLs to prevent a refreshed upload screen from reusing an older comparison engine. The service worker revalidates network requests and retains an offline copy of the current release. When updating these files, keep their release values aligned in `index.html`, `app.js` and `service-worker.js`.
