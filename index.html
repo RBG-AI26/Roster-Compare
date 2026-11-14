@@ -16,7 +16,7 @@
     <link rel="manifest" href="./manifest.json" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=20261114-3" />
+    <link rel="stylesheet" href="./styles.css?v=20261114-4" />
   </head>
   <body>
     <main class="shell">
@@ -67,6 +67,28 @@
       </section>
 
       <section id="results" class="results hidden">
+        <article class="roster-calendar" aria-labelledby="calendar-month">
+          <div class="calendar-toolbar">
+            <button id="calendar-previous" class="calendar-nav" type="button" aria-label="Previous month">←</button>
+            <h2 id="calendar-month"></h2>
+            <button id="calendar-next" class="calendar-nav" type="button" aria-label="Next month">→</button>
+          </div>
+          <div id="calendar-crew-legend" class="calendar-crew-legend"></div>
+          <p class="calendar-help">Pilot rows show trips and home days. Highlighted bars show time in the same port for everyone selected; click for exact times. Dates and times follow the roster’s local dates. * Assumed presence at home base on a day off. Reserve means on call. Shared days off at different bases appear in the table below.</p>
+          <div class="calendar-legend" aria-label="Shared-time colours">
+            <span class="calendar-all-home">Everyone’s home base</span>
+            <span class="calendar-some-home">Someone’s home base</span>
+            <span class="calendar-all-away">Away for everyone</span>
+          </div>
+          <div class="calendar-scroll" tabindex="0" role="region" aria-label="Roster calendar, scroll horizontally on smaller screens">
+            <div id="calendar-grid" class="calendar-grid" role="table" aria-label="Monthly pilot rosters and shared time"></div>
+          </div>
+          <section id="calendar-details" class="calendar-details" aria-live="polite" hidden>
+            <div class="calendar-detail-heading"><h3 id="calendar-detail-title"></h3><button id="calendar-detail-close" class="calendar-nav" type="button" aria-label="Close calendar details">×</button></div>
+            <p id="calendar-detail-subtitle"></p>
+            <p id="calendar-detail-text"></p>
+          </section>
+        </article>
         <div class="summary-row" id="summary-row"></div>
 
         <article class="results-card">
@@ -94,6 +116,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js?v=20261114-3"></script>
+    <script type="module" src="./app.js?v=20261114-4"></script>
   </body>
 </html>

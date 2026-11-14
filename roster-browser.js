@@ -221,7 +221,7 @@ function parseLongHaulRoster(fileName, text, metadata) {
   }
 
   const offDays = calendar.filter((entry) => LONG_HAUL_OFF_DUTY_CODES.has(entry.dutyCode));
-  const { portWindows, unresolvedDuties } = buildDutyWindows(calendar, patterns);
+  const { portWindows, unresolvedDuties, trips } = buildDutyWindows(calendar, patterns);
 
   return buildRosterRecord({
     crewName: metadata.crewName,
@@ -234,6 +234,7 @@ function parseLongHaulRoster(fileName, text, metadata) {
     patterns,
     offDays,
     reserveDays: [],
+    trips,
     portWindows,
     unresolvedDuties,
     preview: text.split("\n").slice(0, 20).join("\n"),
@@ -252,6 +253,7 @@ function parseShortHaulRoster(fileName, text, metadata) {
   const reserveDays = calendar.filter((entry) => isShortHaulReserveDuty(entry.dutyCode));
   const portWindows = buildShortHaulPortWindows(calendar, detailData.blocks, metadata.base);
   const unresolvedDuties = buildShortHaulUnresolvedDuties(calendar, detailData.blocks);
+  const trips = detailData.blocks.map((block) => ({ code: block.code, legs: block.legs }));
 
   return buildRosterRecord({
     crewName: metadata.crewName,
@@ -264,6 +266,7 @@ function parseShortHaulRoster(fileName, text, metadata) {
     patterns: detailData.blocks,
     offDays,
     reserveDays,
+    trips,
     portWindows,
     unresolvedDuties,
     preview: text.split("\n").slice(0, 20).join("\n"),
@@ -281,6 +284,7 @@ function buildRosterRecord({
   patterns,
   offDays,
   reserveDays = [],
+  trips = [],
   portWindows,
   unresolvedDuties,
   preview,
@@ -297,6 +301,7 @@ function buildRosterRecord({
     patterns,
     offDays,
     reserveDays,
+    trips,
     portWindows,
     unresolvedDuties,
     coverageStart: calendar.length ? calendar[0].date : null,
@@ -419,6 +424,7 @@ function parseShortHaulDetailBlock(code, blockDate, lines) {
 
   return {
     code,
+    legs,
     startDate: legs[0].flightDate,
     coveredDates,
     servicesByDate,
@@ -969,6 +975,7 @@ function parseFlightLine(line) {
 function buildDutyWindows(calendar, patterns) {
   const portWindows = [];
   const unresolvedDuties = [];
+  const trips = [];
 
   for (const group of groupCalendarDuties(calendar)) {
     if (LONG_HAUL_OFF_DUTY_CODES.has(group[0].dutyCode)) {
@@ -986,6 +993,12 @@ function buildDutyWindows(calendar, patterns) {
       unresolvedDuties.push(group[0]);
       continue;
     }
+
+    trips.push({ code: pattern.code, legs: instantiated.map((leg) => ({
+      ...leg.flight,
+      departureDateTime: leg.departureDateTime,
+      arrivalDateTime: leg.arrivalDateTime,
+    })) });
 
     instantiated.forEach((leg, index) => {
       const { departureDateTime, arrivalDateTime, flight } = leg;
@@ -1005,7 +1018,7 @@ function buildDutyWindows(calendar, patterns) {
     });
   }
 
-  return { portWindows, unresolvedDuties };
+  return { portWindows, unresolvedDuties, trips };
 }
 
 function groupCalendarDuties(calendar) {

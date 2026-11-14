@@ -3,9 +3,11 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-const app = (await readFile(new URL('../app.js', import.meta.url), 'utf8')).replace(/^import .*;\n/, '');
+const app = (await readFile(new URL('../app.js', import.meta.url), 'utf8')).replace(/^import .*;\n/gm, '');
 const parserSource = await readFile(new URL('../roster-browser.js', import.meta.url), 'utf8');
 const parser = await import(`data:text/javascript;base64,${Buffer.from(parserSource).toString('base64')}`);
+const calendarSource = await readFile(new URL('../roster-calendar.js', import.meta.url), 'utf8');
+const calendar = await import(`data:text/javascript;base64,${Buffer.from(calendarSource).toString('base64')}`);
 const storageKey = 'roster-compare-state-v2';
 function roster(index) {
   return { fileName: `webcis-${index}.txt`, text: `webCIS\nName: TEST PILOT ${String.fromCharCode(65 + index)}  Staff No: ${100000 + index}\nBase: SYD\nBid Period 1\nDate: 01 Jan 2026\nDate Duty Detail\n05/01 M A\nEND OF REPORT\n` };
@@ -24,10 +26,10 @@ function setup(saved) {
     return { textContent: '', innerHTML: '', value: '60', disabled: false, children: [], events: {},
       classList: { add: c => classes.add(c), remove: c => classes.delete(c), contains: c => classes.has(c), toggle: (c, on) => on ? classes.add(c) : classes.delete(c) },
       addEventListener(name, callback) { this.events[name] = callback; },
-      querySelectorAll: () => [], appendChild(child) { this.children.push(child); }, reset() {}, checkValidity: () => true, reportValidity: () => true,
+      scrollIntoView() {}, querySelectorAll: () => [], appendChild(child) { this.children.push(child); }, reset() {}, checkValidity: () => true, reportValidity: () => true,
     };
   }
-  const context = vm.createContext({ ...parser, compareRosterGroup: (...args) => { comparisonCalls += 1; return parser.compareRosterGroup(...args); }, console, Error, navigator: {}, window: { addEventListener() {} },
+  const context = vm.createContext({ ...parser, ...calendar, compareRosterGroup: (...args) => { comparisonCalls += 1; return parser.compareRosterGroup(...args); }, console, Error, navigator: {}, window: { addEventListener() {} },
     document: { getElementById(id) { assert.ok(html.includes(`id="${id}"`), `Missing HTML element ${id}`); if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }, createElement: element },
     localStorage: { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: k => store.delete(k) },
   });
@@ -124,4 +126,48 @@ test('adding another roster immediately replaces results with the new crew selec
   await ui.add([file(2)]);
   assert.match(ui.elements.get('results-head').innerHTML, /<th>C<\/th>/);
   assert.match(ui.elements.get('status').textContent, /Comparison complete/);
+});
+
+test('calendar follows crew selection and clears alongside comparison results', async () => {
+  const ui = setup();
+  await ui.add([0, 1, 2, 3, 4].map(file));
+  assert.equal(ui.elements.get('calendar-month').textContent, 'January 2026');
+  assert.equal((ui.elements.get('calendar-grid').innerHTML.match(/class="calendar-lane calendar-pilot-lane"/g) || []).length, 25);
+  ui.select(1, false); ui.select(2, false); ui.select(3, false);
+  assert.equal((ui.elements.get('calendar-grid').innerHTML.match(/class="calendar-lane calendar-pilot-lane"/g) || []).length, 10);
+  ui.select(4, false);
+  assert.equal(ui.elements.get('calendar-grid').innerHTML, '');
+  ui.select(1, true);
+  assert.match(ui.elements.get('calendar-grid').innerHTML, /calendar-overlap/);
+  ui.elements.get('clear-storage-button').events.click();
+  assert.equal(ui.elements.get('calendar-grid').innerHTML, '');
+});
+
+test('calendar navigation respects coverage, persists month and opens/closes details', () => {
+  const rosters = [0, 1].map(index => {
+    const value = roster(index);
+    value.text = value.text.replace('05/01 M A', '05/01 M A\n05/02 T A');
+    return value;
+  });
+  const ui = setup({ calendarMonth: '2026-01-01', currentInputs: { rosters } });
+  assert.equal(ui.elements.get('calendar-previous').disabled, true);
+  ui.elements.get('calendar-next').events.click();
+  assert.equal(ui.elements.get('calendar-month').textContent, 'February 2026');
+  assert.equal(ui.elements.get('calendar-next').disabled, true);
+  ui.elements.get('calendar-next').events.click();
+  assert.equal(ui.elements.get('calendar-month').textContent, 'February 2026');
+  assert.equal(JSON.parse(ui.store.get(storageKey)).calendarMonth, '2026-02-01');
+  const restored = setup(JSON.parse(ui.store.get(storageKey)));
+  assert.equal(restored.elements.get('calendar-month').textContent, 'February 2026');
+  const markup = ui.elements.get('calendar-grid').innerHTML;
+  const id = markup.match(/class="calendar-bar calendar-overlap[^>]*data-calendar-detail="(\d+)"/)[1];
+  ui.elements.get('calendar-grid').events.click({ target: { closest: () => ({ dataset: { calendarDetail: id } }) } });
+  assert.equal(ui.elements.get('calendar-details').hidden, false);
+  assert.match(ui.elements.get('calendar-detail-title').textContent, /SYD/);
+  assert.match(ui.elements.get('calendar-detail-subtitle').textContent, /Feb 2026/);
+  assert.match(ui.elements.get('calendar-detail-text').textContent, /Assumed at home base/);
+  ui.elements.get('calendar-detail-close').events.click();
+  assert.equal(ui.elements.get('calendar-details').hidden, true);
+  ui.elements.get('calendar-previous').events.click();
+  assert.equal(ui.elements.get('calendar-month').textContent, 'January 2026');
 });

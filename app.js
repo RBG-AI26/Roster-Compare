@@ -1,4 +1,5 @@
-import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261114-3";
+import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261114-4";
+import { buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261114-4";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const VALID_FILTERS = new Set(["all", "port_match", "shared_day_off"]);
@@ -22,6 +23,18 @@ const rosterCount = document.getElementById("roster-count");
 const selectionCount = document.getElementById("selection-count");
 const uploadStatus = document.getElementById("upload-status");
 const MAX_ROSTERS = 5;
+const calendarGrid = document.getElementById("calendar-grid");
+const calendarTitle = document.getElementById("calendar-month");
+const calendarLegend = document.getElementById("calendar-crew-legend");
+const calendarPrevious = document.getElementById("calendar-previous");
+const calendarNext = document.getElementById("calendar-next");
+const calendarDetails = document.getElementById("calendar-details");
+const calendarDetailTitle = document.getElementById("calendar-detail-title");
+const calendarDetailSubtitle = document.getElementById("calendar-detail-subtitle");
+const calendarDetailText = document.getElementById("calendar-detail-text");
+const calendarDetailClose = document.getElementById("calendar-detail-close");
+let calendarMonth = null;
+let calendarModel = null;
 
 let loadedRosters = [];
 let isProcessing = false;
@@ -30,6 +43,47 @@ const comparisonCache = new Map();
 let activeFilter = "all";
 let deferredInstallPrompt = null;
 let pendingReloadForServiceWorker = false;
+
+calendarPrevious.addEventListener("click", () => moveCalendarMonth(-1));
+calendarNext.addEventListener("click", () => moveCalendarMonth(1));
+calendarGrid.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-calendar-detail]");
+  if (!button || !calendarModel) return;
+  const detail = calendarModel.details[Number(button.dataset.calendarDetail)];
+  if (!detail) return;
+  calendarDetailTitle.textContent = detail.title;
+  calendarDetailSubtitle.textContent = detail.subtitle;
+  calendarDetailText.textContent = detail.text;
+  calendarDetails.hidden = false;
+  calendarDetails.scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
+calendarDetailClose.addEventListener("click", () => { calendarDetails.hidden = true; });
+
+function moveCalendarMonth(offset) {
+  if (!calendarMonth || !currentPayload) return;
+  const calendarRosters = selectedRosters().map((roster) => roster.parsed);
+  const bounds = calendarBounds(calendarRosters);
+  const next = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + offset, 1);
+  if (next < bounds.first || next > bounds.last) return;
+  calendarMonth = next;
+  renderCalendar();
+  persistState();
+}
+
+function renderCalendar() {
+  const calendarRosters = selectedRosters().map((roster) => roster.parsed);
+  const bounds = calendarBounds(calendarRosters);
+  if (!calendarMonth || calendarMonth < bounds.first || calendarMonth > bounds.last) {
+    calendarMonth = initialCalendarMonth(calendarRosters);
+  }
+  calendarModel = buildRosterCalendar(calendarRosters, calendarMonth, { minOverlapMinutes: Number(minOverlapInput.value || 60) });
+  calendarTitle.textContent = calendarModel.title;
+  calendarPrevious.disabled = calendarMonth <= bounds.first;
+  calendarNext.disabled = calendarMonth >= bounds.last;
+  calendarLegend.innerHTML = calendarModel.crews.map((crew) => `<span style="--crew-colour: ${crew.colour}"><strong>${escapeHtml(crew.name)}</strong><span>Base ${escapeHtml(crew.base || "unknown")}</span></span>`).join("");
+  calendarGrid.innerHTML = renderCalendarMarkup(calendarModel);
+  calendarDetails.hidden = true;
+}
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
@@ -144,6 +198,7 @@ clearStorageButton.addEventListener("click", () => {
   loadedRosters = [];
   comparisonCache.clear();
   activeFilter = "all";
+  calendarMonth = null;
   form.reset();
   minOverlapInput.value = "60";
   hideResults();
@@ -209,6 +264,9 @@ function selectedRosters() {
 
 function hideResults() {
   currentPayload = null;
+  calendarModel = null;
+  calendarGrid.innerHTML = "";
+  calendarDetails.hidden = true;
   resultsEl.classList.add("hidden");
   resultsHead.innerHTML = "";
   resultsBody.innerHTML = "";
@@ -294,6 +352,7 @@ function rerunComparison() {
 
 function renderResults(payload) {
   resultsEl.classList.remove("hidden");
+  renderCalendar();
   renderSummaries(payload.crews);
   updateResultsTableHeaders(payload.crews);
 
@@ -414,6 +473,7 @@ function persistState() {
       STORAGE_KEY,
       JSON.stringify({
         activeFilter,
+        calendarMonth: calendarMonth ? dateKey(calendarMonth) : null,
         minOverlapMinutes: Number(minOverlapInput.value || 60),
         currentInputs: {
           rosters: loadedRosters.map(({ fileName, text, selected }) => ({ fileName, text, selected })),
@@ -456,6 +516,11 @@ function restorePersistedState() {
 
   if (!isPersistedInputs(savedState.currentInputs)) {
     return;
+  }
+
+  if (/^\d{4}-(0[1-9]|1[0-2])-01$/.test(savedState.calendarMonth || "")) {
+    const [year, month] = savedState.calendarMonth.split("-").map(Number);
+    calendarMonth = new Date(year, month - 1, 1);
   }
 
   for (const roster of savedState.currentInputs.rosters) {
