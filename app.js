@@ -419,7 +419,7 @@ function renderResults(payload) {
   const filteredMatches = payload.matches.filter((match) => activeFilter === "all" || match.match_key === activeFilter);
   resultsBody.innerHTML = "";
   if (!filteredMatches.length) {
-    resultsBody.innerHTML = `<tr><td colspan="${4 + payload.crews.length * 2}" class="empty-state">No matches found under the current rules.</td></tr>`;
+    resultsBody.innerHTML = `<tr><td colspan="${4 + payload.crews.length * 2}" class="empty-state">${payload.crews.length > 2 ? "No whole-group matches under this filter." : "No matches found under the current rules."}</td></tr>`;
   }
 
   for (const match of filteredMatches) {
@@ -451,7 +451,7 @@ function renderResults(payload) {
     notesEl.appendChild(item);
   }
 
-  statusEl.textContent = `Comparison complete. ${filteredMatches.length} displayed match(es) of ${payload.matches.length} total.`;
+  statusEl.textContent = `Comparison complete. ${filteredMatches.length} displayed ${payload.crews.length > 2 ? "whole-group " : ""}match(es) of ${payload.matches.length} total.`;
 }
 
 function renderSummaries(crews) {
