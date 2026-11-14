@@ -2,7 +2,7 @@
   "id": "./",
   "name": "Roster Compare",
   "short_name": "Roster Compare",
-  "description": "Compare two crew roster text files locally with offline access and saved on-device state.",
+  "description": "Load up to five crew rosters and choose who to compare, with offline access and saved on-device state.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

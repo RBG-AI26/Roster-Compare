@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Compare two crew roster text files locally on your device, with offline access and saved state."
+      content="Load up to five crew rosters and choose who to compare, locally on your device."
     />
     <meta name="theme-color" content="#f3eee2" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -22,53 +22,46 @@
     <main class="shell">
       <section class="hero">
         <p class="eyebrow">Roster Compare</p>
-        <h1>Open two or three text rosters and compare.</h1>
+        <h1>Load your rosters. Choose your crew.</h1>
       </section>
 
-      <form id="compare-form" class="panel-grid">
+      <form id="compare-form" class="roster-setup">
         <section class="panel">
-          <h2>Crew A</h2>
-          <p class="panel-copy">Select a single ARMS or webCIS text roster.</p>
-          <label class="dropzone">
-            <span>Choose roster text file</span>
-            <input type="file" name="crew_a" accept=".txt,text/plain" required />
+          <div class="panel-heading">
+            <h2>Add rosters</h2>
+            <span id="roster-count" class="pill">0 / 5 loaded</span>
+          </div>
+          <p class="panel-copy">Add up to five ARMS or webCIS text rosters at once, or add more later.</p>
+          <label id="roster-dropzone" class="dropzone">
+            <span>Choose roster text files or drop them here</span>
+            <input id="roster-files" type="file" name="rosters" accept=".txt,text/plain" multiple aria-describedby="upload-help" />
           </label>
-          <ul class="file-list" data-file-list="crew_a"></ul>
+          <p id="upload-help" class="panel-copy">Files are processed and saved on this device.</p>
+          <p id="upload-status" class="status" role="status" aria-live="polite"></p>
         </section>
 
-        <section class="panel">
-          <h2>Crew B</h2>
-          <p class="panel-copy">Select the second crew member’s text roster.</p>
-          <label class="dropzone">
-            <span>Choose roster text file</span>
-            <input type="file" name="crew_b" accept=".txt,text/plain" required />
-          </label>
-          <ul class="file-list" data-file-list="crew_b"></ul>
-        </section>
-
-        <section class="panel">
-          <h2>Crew C</h2>
-          <p class="panel-copy">Optional: add a third roster for true 3-way overlap comparison.</p>
-          <label class="dropzone">
-            <span>Choose roster text file</span>
-            <input type="file" name="crew_c" accept=".txt,text/plain" />
-          </label>
-          <ul class="file-list" data-file-list="crew_c"></ul>
+        <section class="panel crew-panel" aria-labelledby="crew-heading">
+          <div class="panel-heading">
+            <h2 id="crew-heading">Choose crew to compare</h2>
+            <span id="selection-count" class="pill">0 selected</span>
+          </div>
+          <p class="panel-copy">Select two to five crew. Matches show time shared by everyone selected.</p>
+          <div id="crew-list" class="crew-list"></div>
         </section>
       </form>
 
       <section class="actions">
         <label class="control-card" for="min-overlap-minutes">
           <span>Port match window (minutes)</span>
-          <input id="min-overlap-minutes" name="min_overlap_minutes" type="number" min="1" max="1440" step="1" value="60" />
+          <input id="min-overlap-minutes" name="min_overlap_minutes" form="compare-form" type="number" min="1" max="1440" step="1" value="60" />
         </label>
         <div class="action-buttons">
-          <button id="compare-button" type="submit" form="compare-form">Compare rosters</button>
+          <button id="compare-button" disabled type="submit" form="compare-form">Compare rosters</button>
           <button id="install-button" type="button" class="secondary-button" hidden>Install app</button>
           <button id="clear-storage-button" type="button" class="secondary-button">Clear saved data</button>
         </div>
         <div class="action-copy">
-          <p id="status" class="status">Choose at least two text files to begin.</p>
+          <p id="status" class="status" role="status" aria-live="polite">Add at least two rosters to begin.</p>
           <p class="install-hint">Works offline after the first load. On iPhone or iPad, use Share -> Add to Home Screen.</p>
         </div>
       </section>

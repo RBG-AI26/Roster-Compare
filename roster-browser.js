@@ -19,8 +19,8 @@ const MATCH_SORT_ORDER = new Map([
 ]);
 
 export function compareRosterGroupTexts(rosterInputs, options = {}) {
-  if (!Array.isArray(rosterInputs) || rosterInputs.length < 2 || rosterInputs.length > 3) {
-    throw new Error("Comparison supports 2 or 3 rosters.");
+  if (!Array.isArray(rosterInputs) || rosterInputs.length < 2 || rosterInputs.length > 5) {
+    throw new Error("Select between 2 and 5 rosters to compare.");
   }
 
   const rosters = rosterInputs.map((rosterInput) => parseRosterText(rosterInput.fileName, rosterInput.text));
@@ -32,7 +32,7 @@ export function compareRosterGroupTexts(rosterInputs, options = {}) {
   const matches = (
     rosters.length === 2
       ? buildTwoRosterMatches(rosters[0], rosters[1], portMatchWindowMs)
-      : buildThreeRosterMatches(rosters, portMatchWindowMs)
+      : buildGroupRosterMatches(rosters, portMatchWindowMs)
   ).sort((left, right) => {
     const prioritySort = (MATCH_SORT_ORDER.get(left.match_key) ?? 99) - (MATCH_SORT_ORDER.get(right.match_key) ?? 99);
     if (prioritySort !== 0) {
@@ -83,10 +83,10 @@ function buildTwoRosterMatches(rosterA, rosterB, portMatchWindowMs) {
   );
 }
 
-function buildThreeRosterMatches(rosters, portMatchWindowMs) {
+function buildGroupRosterMatches(rosters, portMatchWindowMs) {
   return dedupeMatches([
-    ...compareThreeWayDaysOff(rosters),
-    ...compareThreeWayPortMatches(rosters, portMatchWindowMs),
+    ...compareGroupDaysOff(rosters),
+    ...compareGroupPortMatches(rosters, portMatchWindowMs),
   ]);
 }
 
@@ -122,79 +122,68 @@ function genericMatchToLegacyMatch(match) {
   };
 }
 
-function compareThreeWayDaysOff(rosters) {
-  const [rosterA, rosterB, rosterC] = rosters;
-  const daysOffByDateB = new Map(rosterB.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
-  const daysOffByDateC = new Map(rosterC.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
+function compareGroupDaysOff(rosters) {
+  const daysOffByDate = rosters.slice(1).map((roster) =>
+    new Map(roster.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]))
+  );
   const matches = [];
 
-  for (const entryA of rosterA.offDays) {
-    const key = formatSortableLocalDate(entryA.date);
-    const entryB = daysOffByDateB.get(key);
-    const entryC = daysOffByDateC.get(key);
-    if (!entryB || !entryC) {
+  for (const firstEntry of rosters[0].offDays) {
+    const key = formatSortableLocalDate(firstEntry.date);
+    const entries = [firstEntry, ...daysOffByDate.map((byDate) => byDate.get(key))];
+    if (entries.some((entry) => !entry)) {
       continue;
     }
-
     matches.push({
-      date: formatDisplayLocalDate(entryA.date),
+      date: formatDisplayLocalDate(firstEntry.date),
       sort_date: key,
       port: formatCombinedPort(rosters.map((roster) => roster.base)),
       match_type: "Shared day off",
       match_key: "shared_day_off",
       overlap_window: "All day",
-      participants: [
-        { label: `${entryA.dutyCode} (${rosterA.base || "base unknown"})`, window: "All day" },
-        { label: `${entryB.dutyCode} (${rosterB.base || "base unknown"})`, window: "All day" },
-        { label: `${entryC.dutyCode} (${rosterC.base || "base unknown"})`, window: "All day" },
-      ],
+      participants: entries.map((entry, index) => ({
+        label: `${entry.dutyCode} (${rosters[index].base || "base unknown"})`,
+        window: "All day",
+      })),
       visual_group: "home_match",
     });
   }
-
   return matches;
 }
 
-function compareThreeWayPortMatches(rosters, portMatchWindowMs) {
-  const [rosterA, rosterB, rosterC] = rosters;
+function compareGroupPortMatches(rosters, portMatchWindowMs) {
   const matches = [];
-
-  for (const windowA of rosterA.portWindows) {
-    for (const windowB of rosterB.portWindows) {
-      if (windowA.port !== windowB.port) {
-        continue;
-      }
-
-      for (const windowC of rosterC.portWindows) {
-        if (windowA.port !== windowC.port) {
-          continue;
-        }
-
-        const overlapStart = Math.max(windowA.start.getTime(), windowB.start.getTime(), windowC.start.getTime());
-        const overlapEnd = Math.min(windowA.end.getTime(), windowB.end.getTime(), windowC.end.getTime());
-        if (overlapEnd - overlapStart < portMatchWindowMs) {
-          continue;
-        }
-
-        const overlapDate = new Date(overlapStart);
-        matches.push({
-          date: formatDisplayLocalDate(overlapDate),
-          sort_date: formatSortableLocalDate(overlapDate),
-          port: windowA.port,
-          match_type: "Port match",
-          match_key: "port_match",
-          overlap_window: formatWindow(new Date(overlapStart), new Date(overlapEnd)),
-          participants: [
-            { label: windowA.dutyCode, window: formatWindow(windowA.start, windowA.end) },
-            { label: windowB.dutyCode, window: formatWindow(windowB.start, windowB.end) },
-            { label: windowC.dutyCode, window: formatWindow(windowC.start, windowC.end) },
-          ],
-          visual_group: "away_port",
-        });
+  // Prune a branch as soon as its common interval is too short.
+  function intersectWindows(index, windows, port, start, end) {
+    if (index === rosters.length) {
+      const overlapDate = new Date(start);
+      matches.push({
+        date: formatDisplayLocalDate(overlapDate),
+        sort_date: formatSortableLocalDate(overlapDate),
+        port,
+        match_type: "Port match",
+        match_key: "port_match",
+        overlap_window: formatWindow(new Date(start), new Date(end)),
+        participants: windows.map((window) => ({
+          label: window.dutyCode,
+          window: formatWindow(window.start, window.end),
+        })),
+        visual_group: "away_port",
+      });
+      return;
+    }
+    for (const window of rosters[index].portWindows) {
+      if (window.port !== port) continue;
+      const nextStart = Math.max(start, window.start.getTime());
+      const nextEnd = Math.min(end, window.end.getTime());
+      if (nextEnd - nextStart >= portMatchWindowMs) {
+        intersectWindows(index + 1, [...windows, window], port, nextStart, nextEnd);
       }
     }
   }
-
+  for (const window of rosters[0].portWindows) {
+    intersectWindows(1, [window], window.port, window.start.getTime(), window.end.getTime());
+  }
   return matches;
 }
 
@@ -1240,7 +1229,7 @@ function buildGroupNotes(rosters) {
   if (rosters.every((roster) => roster.coverageStart && roster.coverageEnd)) {
     if (overlapStart > overlapEnd) {
       notes.push(
-        `Roster date coverage does not overlap across all 3 rosters (${ranges.join(" vs ")}), so dates outside each roster's range are treated as unavailable.`
+        `Roster date coverage does not overlap across all ${rosters.length} rosters (${ranges.join(" vs ")}), so dates outside each roster's range are treated as unavailable.`
       );
     } else if (
       new Set(rosters.map((roster) => `${roster.coverageStart.getTime()}-${roster.coverageEnd.getTime()}`)).size > 1

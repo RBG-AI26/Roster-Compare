@@ -371,3 +371,22 @@ tbody tr.home-match-row {
     display: grid;
   }
 }
+
+.roster-setup { display: grid; gap: 18px; }
+.panel-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.dropzone.is-dragging, .dropzone:focus-within { border-color: var(--accent); background: rgba(15, 108, 92, 0.12); }
+.crew-list { display: grid; gap: 12px; }
+.crew-row { display: flex; align-items: center; gap: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
+.crew-choice { display: flex; flex: 1; min-width: 0; align-items: center; gap: 14px; cursor: pointer; padding: 6px 0; }
+.crew-choice input { flex: 0 0 auto; width: 22px; height: 22px; accent-color: var(--accent); }
+.crew-details { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+.crew-details strong { color: var(--text); }
+.crew-details > span { font-size: 0.9rem; color: var(--muted); }
+.remove-roster { flex: 0 0 auto; width: auto; min-height: 44px; padding: 10px 16px; }
+button:disabled { cursor: not-allowed; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+@media (max-width: 560px) {
+  .crew-row { gap: 8px; }
+  .crew-choice { gap: 10px; }
+  .actions { position: static; }
+}

@@ -1,4 +1,4 @@
-import { compareRosterGroupTexts } from "./roster-browser.js";
+import { compareRosterGroupTexts, parseRosterText } from "./roster-browser.js";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const VALID_FILTERS = new Set(["all", "port_match", "shared_day_off"]);
@@ -15,9 +15,16 @@ const resultsBody = document.getElementById("results-body");
 const notesEl = document.getElementById("notes");
 const summaryRow = document.getElementById("summary-row");
 const filterBar = document.getElementById("match-filters");
-const fileInputs = Array.from(form.querySelectorAll('input[type="file"]'));
+const fileInput = document.getElementById("roster-files");
+const dropzone = document.getElementById("roster-dropzone");
+const crewList = document.getElementById("crew-list");
+const rosterCount = document.getElementById("roster-count");
+const selectionCount = document.getElementById("selection-count");
+const uploadStatus = document.getElementById("upload-status");
+const MAX_ROSTERS = 5;
 
-let currentInputs = null;
+let loadedRosters = [];
+let isProcessing = false;
 let currentPayload = null;
 let activeFilter = "all";
 let deferredInstallPrompt = null;
@@ -70,15 +77,38 @@ window.addEventListener("appinstalled", () => {
   installButton.hidden = true;
 });
 
-for (const input of fileInputs) {
-  input.addEventListener("change", () => renderFileList(input));
+fileInput.addEventListener("change", () => addRosterFiles(Array.from(fileInput.files)));
+for (const eventName of ["dragenter", "dragover"]) {
+  dropzone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    if (!isProcessing) dropzone.classList.add("is-dragging");
+  });
 }
+for (const eventName of ["dragleave", "drop"]) {
+  dropzone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("is-dragging");
+  });
+}
+dropzone.addEventListener("drop", (event) => addRosterFiles(Array.from(event.dataTransfer.files)));
+
+crewList.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-roster-index]");
+  if (!input || isProcessing) return;
+  loadedRosters[Number(input.dataset.rosterIndex)].selected = input.checked;
+  updateSelection();
+});
+crewList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-index]");
+  if (!button || isProcessing) return;
+  loadedRosters.splice(Number(button.dataset.removeIndex), 1);
+  renderCrewList();
+  updateSelection();
+});
 
 minOverlapInput.addEventListener("change", () => {
   persistState();
-  if (currentInputs) {
-    rerunComparison();
-  }
+  if (currentPayload && minOverlapInput.checkValidity()) rerunComparison();
 });
 
 filterBar.addEventListener("click", (event) => {
@@ -106,84 +136,140 @@ installButton.addEventListener("click", async () => {
 });
 
 clearStorageButton.addEventListener("click", () => {
+  if (isProcessing) return;
   clearPersistedState();
-  currentInputs = null;
-  currentPayload = null;
+  loadedRosters = [];
   activeFilter = "all";
   form.reset();
   minOverlapInput.value = "60";
+  hideResults();
+  renderCrewList();
+  updateActiveFilterButton();
+  uploadStatus.textContent = "";
+  statusEl.textContent = "Saved rosters and comparison removed from this device.";
+});
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!isProcessing) rerunComparison();
+});
+
+async function addRosterFiles(files) {
+  if (isProcessing || !files.length) return;
+  if (loadedRosters.length + files.length > MAX_ROSTERS) {
+    uploadStatus.textContent = `You can load up to ${MAX_ROSTERS} rosters. Remove a loaded roster or choose fewer files.`;
+    fileInput.value = "";
+    return;
+  }
+  isProcessing = true;
+  fileInput.disabled = true;
+  clearStorageButton.disabled = true;
+  renderCrewList();
+  uploadStatus.textContent = "Reading and processing rosters…";
+  const messages = [];
+  let added = 0;
+  const outcomes = await Promise.allSettled(files.map(async (file) => {
+    if (!/\.txt$/i.test(file.name) && file.type !== "text/plain") {
+      throw new Error("Choose an ARMS or webCIS .txt roster.");
+    }
+    const text = await file.text();
+    return { fileName: file.name, text, parsed: parseRosterText(file.name, text), selected: true };
+  }));
+  outcomes.forEach((outcome, index) => {
+    if (outcome.status === "rejected") {
+      messages.push(`${files[index].name}: ${outcome.reason instanceof Error ? outcome.reason.message : "Could not read this roster."}`);
+    } else if (loadedRosters.some((roster) => roster.text === outcome.value.text)) {
+      messages.push(`${files[index].name}: this roster is already loaded.`);
+    } else {
+      loadedRosters.push(outcome.value);
+      added += 1;
+    }
+  });
+  isProcessing = false;
+  fileInput.disabled = false;
+  clearStorageButton.disabled = false;
+  fileInput.value = "";
+  if (added) hideResults();
+  renderCrewList();
+  if (currentPayload) renderResults(currentPayload);
+  persistState();
+  uploadStatus.textContent = [`${added} roster${added === 1 ? "" : "s"} added.`, ...messages].join(" ");
+}
+
+function selectedRosters() {
+  return loadedRosters.filter((roster) => roster.selected);
+}
+
+function hideResults() {
+  currentPayload = null;
   resultsEl.classList.add("hidden");
   resultsHead.innerHTML = "";
   resultsBody.innerHTML = "";
   notesEl.innerHTML = "";
-  renderSummaries([emptySummary("Crew A"), emptySummary("Crew B"), emptySummary("Crew C")]);
-  updateResultsTableHeaders([emptySummary("Crew A"), emptySummary("Crew B")]);
-  for (const input of fileInputs) {
-    renderFileList(input);
-  }
-  updateActiveFilterButton();
-  statusEl.textContent = "Saved comparison removed from this device.";
-});
+  summaryRow.innerHTML = "";
+}
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
+function updateSelection() {
+  const shouldCompare = Boolean(currentPayload);
+  persistState();
+  updateRosterControls();
+  if (selectedRosters().length < 2) hideResults();
+  else if (shouldCompare) rerunComparison();
+}
 
-  const crewAFile = form.elements.crew_a.files[0];
-  const crewBFile = form.elements.crew_b.files[0];
-  const crewCFile = form.elements.crew_c.files[0];
-  if (!crewAFile || !crewBFile) {
-    statusEl.textContent = "Choose one text roster for each crew member.";
-    return;
-  }
+function updateRosterControls() {
+  rosterCount.textContent = `${loadedRosters.length} / ${MAX_ROSTERS} loaded`;
+  const count = selectedRosters().length;
+  selectionCount.textContent = `${count} selected`;
+  compareButton.disabled = isProcessing || count < 2;
+  if (isProcessing) statusEl.textContent = "Processing roster files…";
+  else if (count < 2) statusEl.textContent = loadedRosters.length < 2 ? "Add at least two rosters to begin." : "Select at least two crew to compare.";
+  else if (!currentPayload) statusEl.textContent = `${count} crew selected. Ready to compare.`;
+}
 
-  compareButton.disabled = true;
-  statusEl.textContent = crewCFile
-    ? "Reading 3 rosters and comparing shared overlap..."
-    : "Reading rosters and comparing port matches...";
-
-  try {
-    const rosterFiles = [crewAFile, crewBFile, crewCFile].filter(Boolean);
-    const rosterTexts = await Promise.all(rosterFiles.map((file) => file.text()));
-    currentInputs = {
-      rosters: rosterFiles.map((file, index) => ({
-        fileName: file.name,
-        text: rosterTexts[index],
-      })),
-    };
-    rerunComparison();
-  } catch (error) {
-    resultsEl.classList.add("hidden");
-    statusEl.textContent = error instanceof Error ? error.message : "Comparison failed.";
-  } finally {
-    compareButton.disabled = false;
-  }
-});
+function renderCrewList() {
+  updateRosterControls();
+  crewList.innerHTML = loadedRosters.length ? loadedRosters.map((roster, index) => {
+    const crew = roster.parsed;
+    const name = crew.crewName !== "Unknown" ? crew.crewName : roster.fileName;
+    return `
+      <div class="crew-row">
+        <label class="crew-choice">
+          <input type="checkbox" data-roster-index="${index}" ${roster.selected ? "checked" : ""} ${isProcessing ? "disabled" : ""} />
+          <span class="crew-details">
+            <strong>${escapeHtml(name)}</strong>
+            <span>${escapeHtml([crew.staffNumber && `Staff ${crew.staffNumber}`, crew.base, crew.bidPeriod && `BP ${crew.bidPeriod}`].filter(Boolean).join(" · ") || "Crew details unavailable")}</span>
+            <span class="crew-filename">${escapeHtml(roster.fileName)}</span>
+          </span>
+        </label>
+        <button type="button" class="secondary-button remove-roster" data-remove-index="${index}" aria-label="Remove ${escapeHtml(name)}" ${isProcessing ? "disabled" : ""}>Remove</button>
+      </div>`;
+  }).join("") : '<p class="empty-state">Your crew will appear here after you add rosters.</p>';
+}
 
 function rerunComparison() {
-  if (!currentInputs) {
+  const rosters = selectedRosters();
+  if (rosters.length < 2) {
+    hideResults();
+    renderCrewList();
     return;
   }
-
+  if (!minOverlapInput.reportValidity()) {
+    hideResults();
+    statusEl.textContent = "Enter a port match window between 1 and 1440 minutes.";
+    return;
+  }
   try {
-    const payload = compareRosterGroupTexts(currentInputs.rosters, {
+    const payload = compareRosterGroupTexts(rosters, {
       minPortOverlapMinutes: Number(minOverlapInput.value || 60),
     });
     currentPayload = payload;
     renderResults(payload);
     persistState();
   } catch (error) {
-    currentPayload = null;
-    resultsEl.classList.add("hidden");
+    hideResults();
     statusEl.textContent = error instanceof Error ? error.message : "Comparison failed.";
   }
-}
-
-function renderFileList(input) {
-  const list = document.querySelector(`[data-file-list="${input.name}"]`);
-  const message = input.files.length
-    ? `${input.files[0].name} (${Math.round(input.files[0].size / 1024)} KB)`
-    : "No file selected.";
-  renderFileListMessage(list, message);
 }
 
 function renderResults(payload) {
@@ -267,24 +353,6 @@ function renderSummaryCard(index, summary) {
   `;
 }
 
-function emptySummary(label = "No roster loaded") {
-  return {
-    crew_name: label,
-    display_name: label,
-    staff_number: null,
-    base: null,
-    bid_period: null,
-    unresolved_duties: [],
-  };
-}
-
-function renderFileListMessage(list, message) {
-  list.innerHTML = "";
-  const item = document.createElement("li");
-  item.textContent = message;
-  list.appendChild(item);
-}
-
 function updateActiveFilterButton() {
   for (const button of filterBar.querySelectorAll("[data-filter]")) {
     button.classList.toggle("is-active", button.dataset.filter === activeFilter);
@@ -326,7 +394,9 @@ function persistState() {
       JSON.stringify({
         activeFilter,
         minOverlapMinutes: Number(minOverlapInput.value || 60),
-        currentInputs,
+        currentInputs: {
+          rosters: loadedRosters.map(({ fileName, text, selected }) => ({ fileName, text, selected })),
+        },
       })
     );
   } catch {
@@ -354,28 +424,30 @@ function restorePersistedState() {
       : savedState.minOverlapHours != null
         ? Number(savedState.minOverlapHours) * 60
         : null;
-  if (Number.isFinite(minOverlapMinutes) && minOverlapMinutes >= 1) {
+  if (Number.isInteger(minOverlapMinutes) && minOverlapMinutes >= 1 && minOverlapMinutes <= 1440) {
     minOverlapInput.value = String(minOverlapMinutes);
   }
 
   if (VALID_FILTERS.has(savedState.activeFilter)) {
     activeFilter = savedState.activeFilter;
+    updateActiveFilterButton();
   }
 
   if (!isPersistedInputs(savedState.currentInputs)) {
     return;
   }
 
-  currentInputs = savedState.currentInputs;
-  currentInputs.rosters.forEach((roster, index) => {
-    renderFileListMessage(
-      document.querySelector(`[data-file-list="crew_${String.fromCharCode(97 + index)}"]`),
-      `${roster.fileName} (saved on this device)`
-    );
-  });
-  rerunComparison();
+  for (const roster of savedState.currentInputs.rosters) {
+    try {
+      loadedRosters.push({ ...roster, selected: roster.selected !== false, parsed: parseRosterText(roster.fileName, roster.text) });
+    } catch {
+      uploadStatus.textContent = "Some saved rosters could not be read. Add those files again.";
+    }
+  }
+  renderCrewList();
+  if (selectedRosters().length >= 2) rerunComparison();
   if (currentPayload) {
-    statusEl.textContent = `Restored saved comparison from this device. ${statusEl.textContent}`;
+    statusEl.textContent = `Restored saved rosters and crew selection. ${statusEl.textContent}`;
   }
 }
 
@@ -383,9 +455,8 @@ function isPersistedInputs(value) {
   return Boolean(
     value &&
       Array.isArray(value.rosters) &&
-      value.rosters.length >= 2 &&
-      value.rosters.length <= 3 &&
-      value.rosters.every((roster) => typeof roster.fileName === "string" && typeof roster.text === "string")
+      value.rosters.length <= MAX_ROSTERS &&
+      value.rosters.every((roster) => roster && typeof roster.fileName === "string" && typeof roster.text === "string")
   );
 }
 
@@ -398,11 +469,6 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-for (const input of fileInputs) {
-  renderFileList(input);
-}
-
-renderSummaries([emptySummary("Crew A"), emptySummary("Crew B"), emptySummary("Crew C")]);
-updateResultsTableHeaders([emptySummary("Crew A"), emptySummary("Crew B")]);
+renderCrewList();
 updateActiveFilterButton();
 restorePersistedState();
