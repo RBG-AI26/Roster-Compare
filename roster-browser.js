@@ -158,7 +158,7 @@ const homePort = roster => roster.requiresDomicile ? null : roster.domicile || r
 function comparisonWindows(roster) {
   return [...roster.portWindows, ...roster.offDays.filter(() => homePort(roster)).flatMap(entry => offDayWindows(entry).map(window => ({
     ...window, port: homePort(roster), dutyCode: `${entry.dutyCode} (${homePort(roster)} · assumed home)`, assumed: true,
-  })))];
+  }))), ...boundaryHomeWindows(roster)];
 }
 
 function compareGroupPortMatches(rosters, portMatchWindowMs) {
@@ -166,11 +166,11 @@ function compareGroupPortMatches(rosters, portMatchWindowMs) {
   function intersect(index, port, start, end, participants) {
     if (index === rosters.length) {
       // Shared days off already have a dedicated result; avoid duplicating them.
-      if (participants.every(window => window.assumed)) return;
+      if (participants.every(window => window.assumed && !window.boundary)) return;
       if (rosters.length === 2 && participants.some(window => window.matchType === "home_reserve") && participants.some(window => window.assumed)) return;
       const date = new Date(start);
       matches.push({ date: formatDisplayLocalDate(date), sort_date: formatSortableLocalDate(date), port,
-        match_type: "Port match", match_key: "port_match", overlap_window: formatWindow(date, new Date(end)),
+        match_type: participants.every(window => window.assumed) ? "Shared time off" : "Port match", match_key: "port_match", overlap_window: formatWindow(date, new Date(end)),
         participants: participants.map(window => ({ label: window.dutyCode, window: formatWindow(window.start, window.end) })),
         visual_group: rosters.some(roster => homePort(roster) === port) ? "home_match" : "away_port" });
       return;
@@ -349,7 +349,7 @@ function parseShortHaulRoster(fileName, text, metadata) {
     throw new Error("No calendar entries could be parsed from the roster.");
   }
 
-  const trips = detailData.blocks.map((block) => ({ code: block.code, legs: block.legs }));
+  const trips = detailData.blocks.map((block) => ({ code: block.code, anchorDate: block.startDate, dutyTimes: block.dutyTimes, legs: block.legs }));
   const nonFlying = resolveNonFlyingDuties(calendar, detailData.blocks, trips, metadata.base);
   const offDays = collectOffDays(calendar, [...detailData.blocks.flatMap(block => block.portWindows), ...nonFlying.portWindows, ...trips.flatMap(trip => trip.legs.map(leg => ({ start: leg.departureDateTime, end: leg.arrivalDateTime })))]);
   const reserveDays = calendar.filter(entry => entry.dutyInfo?.kind === "reserve");
@@ -390,7 +390,7 @@ function buildRosterRecord({
   unresolvedDuties,
   preview,
 }) {
-  return {
+  const roster = {
     crewName: crewName.replace(/\s+/g, " ").trim(),
     displayName: buildDisplayName(crewName, source),
     staffNumber,
@@ -410,6 +410,127 @@ function buildRosterRecord({
     coverageEnd: calendar.length ? calendar[calendar.length - 1].date : null,
     preview,
   };
+  roster.dutyBlocks = buildRosterDutyBlocks(roster);
+  // Printed report/release times also trim an adjacent full-day off marker.
+  roster.offDays = roster.offDays.map(entry => ({ ...entry,
+    homeWindows: subtractWindows(offDayWindows(entry), roster.dutyBlocks),
+  })).filter(entry => entry.homeWindows.length);
+  roster.homeBoundaryWindows = buildHomeBoundaryWindows(roster);
+  return roster;
+}
+
+function subtractWindows(windows, occupied) {
+  let pieces = windows;
+  for (const busy of occupied) pieces = pieces.flatMap(piece => {
+    if (busy.end <= piece.start || busy.start >= piece.end) return [piece];
+    return [piece.start < busy.start ? { ...piece, end: busy.start } : null,
+      piece.end > busy.end ? { ...piece, start: busy.end } : null].filter(Boolean);
+  });
+  return pieces;
+}
+
+function datedDutyEnd(entry) {
+  if (!validDutyTime(entry.end)) return null;
+  const end = combineDateTime(entry.date, entry.end);
+  return validDutyTime(entry.report) && entry.end <= entry.report ? combineDateTime(addDays(entry.date, 1), entry.end) : end;
+}
+
+function buildRosterDutyBlocks(roster) {
+  const blocks = [];
+  for (const trip of roster.trips) {
+    const first = trip.legs[0], last = trip.legs.at(-1);
+    if (!first || !last) continue;
+    const anchor = trip.anchorDate || new Date(first.departureDateTime.getFullYear(), first.departureDateTime.getMonth(), first.departureDateTime.getDate());
+    const lastDayEnd = addDays(last.arrivalDateTime, 1);
+    const rows = roster.calendar.filter(entry => entry.dutyCode === trip.code && entry.date >= anchor && entry.date < lastDayEnd);
+    const details = trip.dutyTimes || [];
+    const reports = [...rows, ...details].filter(entry => validDutyTime(entry.report)).map(entry => combineDateTime(entry.date, entry.report)).filter(time => time <= first.departureDateTime);
+    // A report time printed in the flight pattern belongs to its departure day,
+    // or the preceding evening when it is later than the departure clock time.
+    if (!reports.length && validDutyTime(first.report)) {
+      let report = combineDateTime(first.departureDateTime, first.report);
+      if (report > first.departureDateTime) report = combineDateTime(addDays(first.departureDateTime, -1), first.report);
+      reports.push(report);
+    }
+    const releases = [...rows, ...details].map(datedDutyEnd).filter(time => time && time >= last.arrivalDateTime);
+    const start = reports.length ? new Date(Math.min(...reports)) : first.departureDateTime;
+    const end = releases.length ? new Date(Math.max(...releases)) : last.arrivalDateTime;
+    if (end <= start) continue;
+    blocks.push({ start, end, startKnown: reports.length > 0, endKnown: releases.length > 0,
+      startPort: first.origin, endPort: last.destination, dutyCode: trip.code });
+  }
+  for (const entry of roster.calendar) {
+    const info = entry.dutyInfo;
+    if (info?.port && !info.assumeHome && (!entry.report || validDutyTime(entry.report)) && (!entry.end || validDutyTime(entry.end))) {
+      const startKnown = Boolean(info.start) || validDutyTime(entry.report);
+      const endKnown = Boolean(info.end) || validDutyTime(entry.end);
+      if (startKnown || endKnown) blocks.push({ start: info.start || (startKnown ? combineDateTime(entry.date, entry.report) : entry.date),
+        end: info.end || datedDutyEnd(entry) || addDays(entry.date, 1), startKnown, endKnown,
+        startPort: info.port, endPort: info.port, dutyCode: info.label });
+    }
+  }
+  // Unknown or incompletely timed duties are barriers, never gaps to fill at home.
+  for (const entry of roster.unresolvedDuties) {
+    if (entry.dutyInfo?.port && (!entry.report || validDutyTime(entry.report)) && (!entry.end || validDutyTime(entry.end)) && (validDutyTime(entry.report) || validDutyTime(entry.end) || entry.dutyInfo.start)) continue;
+    blocks.push({ start: entry.date, end: addDays(entry.date, 1), startKnown: false, endKnown: false,
+      startPort: null, endPort: null, dutyCode: entry.dutyCode });
+  }
+  return blocks.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+function buildHomeBoundaryWindows(roster) {
+  const groups = [];
+  for (const block of roster.dutyBlocks) {
+    const previous = groups.at(-1);
+    if (!previous || block.start > previous.end) { groups.push({ ...block }); continue; }
+    if (block.start.getTime() === previous.start.getTime()) {
+      previous.startKnown &&= block.startKnown;
+      if (previous.startPort !== block.startPort) previous.startPort = null;
+    }
+    if (block.end > previous.end) {
+      previous.end = block.end; previous.endKnown = block.endKnown; previous.endPort = block.endPort;
+    } else if (block.end.getTime() === previous.end.getTime()) {
+      previous.endKnown &&= block.endKnown;
+      if (previous.endPort !== block.endPort) previous.endPort = null;
+    }
+    previous.dutyCode = [...new Set([...previous.dutyCode.split(" / "), block.dutyCode])].join(" / ");
+  }
+  const dates = new Set(roster.calendar.map(entry => formatSortableLocalDate(entry.date)));
+  const windows = new Map();
+  const offWindows = roster.offDays.flatMap(offDayWindows);
+  function add(start, end, anchors, label, kind) {
+    if (end <= start || anchors.some(port => !port) || !dates.has(formatSortableLocalDate(start))) return;
+    for (const piece of subtractWindows([{ start, end }], offWindows)) {
+      const key = `${piece.start.getTime()}:${piece.end.getTime()}:${[...new Set(anchors)].sort().join(",")}`;
+      const previous = windows.get(key);
+      if (previous) { previous.dutyCode += ` / ${label}`; previous.kind = "between"; }
+      else windows.set(key, { ...piece, anchorPorts: [...new Set(anchors)], dutyCode: label, kind, boundary: true });
+    }
+  }
+  groups.forEach((block, index) => {
+    const previous = groups[index - 1], next = groups[index + 1];
+    const firstDay = new Date(block.start.getFullYear(), block.start.getMonth(), block.start.getDate());
+    const lastDayEnd = addDays(block.end, 1);
+    if (block.startKnown && block.startPort) {
+      const sameDayPrevious = previous && previous.end > firstDay;
+      if (!sameDayPrevious || previous.endKnown) add(sameDayPrevious ? previous.end : firstDay, block.start,
+        [block.startPort, ...(sameDayPrevious ? [previous.endPort] : [])], `${block.dutyCode} · before duty`, "before");
+    }
+    if (block.endKnown && block.endPort) {
+      const sameDayNext = next && next.start < lastDayEnd;
+      if (!sameDayNext || next.startKnown) add(block.end, sameDayNext ? next.start : lastDayEnd,
+        [block.endPort, ...(sameDayNext ? [next.startPort] : [])], `${block.dutyCode} · after duty`, "after");
+    }
+  });
+  return [...windows.values()].sort((a, b) => a.start - b.start);
+}
+
+function boundaryHomeWindows(roster) {
+  const port = homePort(roster);
+  if (!port) return [];
+  return (roster.homeBoundaryWindows || []).filter(window => window.anchorPorts.every(anchor => anchor === roster.base || anchor === port)).map(window => ({
+    ...window, port, assumed: true, dutyCode: `${window.dutyCode} (${port} · assumed domicile; commute not included)`,
+  }));
 }
 
 function isShortHaulRoster(text) {
@@ -481,12 +602,14 @@ function parseShortHaulDetailBlocks(text) {
 }
 
 function parseShortHaulDetailBlock(code, blockDate, lines) {
-  const legs = [];
+  const legs = [], dutyTimes = [];
   let previousDate = null;
 
   for (const line of lines) {
     const leg = parseShortHaulLegLine(line, blockDate, previousDate);
     if (!leg) {
+      const times = line.match(/\bRpt\s+(\d{4})\s+Rls\s+(\d{4})\b/);
+      if (times && previousDate) dutyTimes.push({ date: previousDate, report: times[1], end: times[2] });
       continue;
     }
     legs.push(leg);
@@ -527,6 +650,7 @@ function parseShortHaulDetailBlock(code, blockDate, lines) {
   return {
     code,
     legs,
+    dutyTimes,
     startDate: legs[0].flightDate,
     coveredDates,
     servicesByDate,
@@ -847,6 +971,7 @@ function extractTimeField(value) {
 function parseCalendarEntries(text, generationDate) {
   const columns = [];
   let capture = false;
+  let timeColumns = null;
   const lineRegex = /(?<date>\d{2}\/\d{2})\s+(?<dow>[MTWFSU])\s+(?<duty>[A-Z0-9]+)(?<rest>.*)/;
 
   for (const rawLine of text.split("\n")) {
@@ -854,6 +979,9 @@ function parseCalendarEntries(text, generationDate) {
 
     if (/^\s*Date\b/i.test(line) && /Duty/i.test(line) && /Detail/i.test(line)) {
       capture = true;
+      const header = line.split("|")[0];
+      const report = header.search(/\bRept\b/), end = header.search(/\bEnd\b/);
+      timeColumns = report >= 20 && end > report ? { report, end } : null;
       continue;
     }
     if (capture && (line.includes("Carry Out") || line.includes("END OF REPORT"))) {
@@ -872,6 +1000,10 @@ function parseCalendarEntries(text, generationDate) {
         return;
       }
       const parsedRest = parseCalendarRest(match.groups.rest.trim());
+      if (timeColumns) {
+        parsedRest.report = extractTimeField(segment.slice(timeColumns.report, timeColumns.end));
+        parsedRest.end = extractTimeField(segment.slice(timeColumns.end, timeColumns.end + 5));
+      }
       if (!columns[index]) columns[index] = [];
       columns[index].push({
         dateText: match.groups.date,
@@ -1046,7 +1178,7 @@ function buildDutyWindows(calendar, patterns) {
     const instantiated = instantiatePattern(entry.date, pattern);
     if (!instantiated.length) { unresolvedDuties.push(entry); continue; }
     seenThrough.set(entry.dutyCode, instantiated.at(-1).arrivalDateTime.getTime());
-    trips.push({ code: pattern.code, legs: instantiated.map(leg => ({ ...leg.flight, departureDateTime: leg.departureDateTime, arrivalDateTime: leg.arrivalDateTime })) });
+    trips.push({ code: pattern.code, anchorDate: entry.date, legs: instantiated.map(leg => ({ ...leg.flight, departureDateTime: leg.departureDateTime, arrivalDateTime: leg.arrivalDateTime })) });
 
     instantiated.forEach((leg, index) => {
       const { departureDateTime, arrivalDateTime, flight } = leg;

@@ -166,7 +166,7 @@ test('calendar navigation respects coverage, persists month and opens/closes det
   assert.equal(ui.elements.get('calendar-details').hidden, false);
   assert.match(ui.elements.get('calendar-detail-title').textContent, /SYD/);
   assert.match(ui.elements.get('calendar-detail-subtitle').textContent, /Feb 2026/);
-  assert.match(ui.elements.get('calendar-detail-text').textContent, /Assumed at home base/);
+  assert.match(ui.elements.get('calendar-detail-text').textContent, /Assumed at the selected domicile/);
   ui.elements.get('calendar-detail-close').events.click();
   assert.equal(ui.elements.get('calendar-details').hidden, true);
   ui.elements.get('calendar-previous').events.click();

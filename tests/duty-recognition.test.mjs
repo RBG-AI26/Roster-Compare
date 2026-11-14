@@ -131,9 +131,9 @@ test('short-haul fixed columns preserve explicit ports for training and standby;
 test('standby comparisons use the actual port and validated times, respecting the threshold', () => {
   const standby = parse('21/05 T SR 0800 0900', '', 'MEL');
   const home = parse('21/05 T RX', '', 'MEL');
-  assert.equal(compareRosterGroup([standby, home]).matches.length, 1);
-  assert.equal(compareRosterGroup([standby, home], {minPortOverlapMinutes:61}).matches.length, 0);
-  assert.match(compareRosterGroup([standby, home]).matches[0].participants[0].label, /on call/);
+  assert.equal(compareRosterGroup([standby, home]).matches.filter(m => m.match_key === 'reserve_at_base').length, 1);
+  assert.equal(compareRosterGroup([standby, home], {minPortOverlapMinutes:61}).matches.filter(m => m.match_key === 'reserve_at_base').length, 0);
+  assert.match(compareRosterGroup([standby, home]).matches.find(m => m.match_key === 'reserve_at_base').participants[0].label, /on call/);
   const invalid = parse('21/05 T SR 2560 1200', '', 'MEL');
   assert.equal(compareRosterGroup([invalid, home]).matches.length, 0);
 });
