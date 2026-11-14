@@ -19,17 +19,11 @@ const MATCH_SORT_ORDER = new Map([
 ]);
 
 export function compareRosterGroupTexts(rosterInputs, options = {}) {
-  if (!Array.isArray(rosterInputs) || rosterInputs.length < 2 || rosterInputs.length > 5) {
-    throw new Error("Select between 2 and 5 rosters to compare.");
+  if (!Array.isArray(rosterInputs) || rosterInputs.length < 2 || rosterInputs.length > 3) {
+    throw new Error("Comparison supports 2 or 3 rosters.");
   }
 
-  return compareRosterGroup(rosterInputs.map((rosterInput) => parseRosterText(rosterInput.fileName, rosterInput.text)), options);
-}
-
-export function compareRosterGroup(rosters, options = {}) {
-  if (!Array.isArray(rosters) || rosters.length < 2 || rosters.length > 5) {
-    throw new Error("Select between 2 and 5 rosters to compare.");
-  }
+  const rosters = rosterInputs.map((rosterInput) => parseRosterText(rosterInput.fileName, rosterInput.text));
   const portMatchWindowMs =
     options.minPortOverlapMinutes != null
       ? Math.max(1, Number(options.minPortOverlapMinutes || 60)) * 60 * 1000
@@ -38,7 +32,7 @@ export function compareRosterGroup(rosters, options = {}) {
   const matches = (
     rosters.length === 2
       ? buildTwoRosterMatches(rosters[0], rosters[1], portMatchWindowMs)
-      : buildGroupRosterMatches(rosters, portMatchWindowMs)
+      : buildThreeRosterMatches(rosters, portMatchWindowMs)
   ).sort((left, right) => {
     const prioritySort = (MATCH_SORT_ORDER.get(left.match_key) ?? 99) - (MATCH_SORT_ORDER.get(right.match_key) ?? 99);
     if (prioritySort !== 0) {
@@ -89,10 +83,10 @@ function buildTwoRosterMatches(rosterA, rosterB, portMatchWindowMs) {
   );
 }
 
-function buildGroupRosterMatches(rosters, portMatchWindowMs) {
+function buildThreeRosterMatches(rosters, portMatchWindowMs) {
   return dedupeMatches([
-    ...compareGroupDaysOff(rosters),
-    ...compareGroupPortMatches(rosters, portMatchWindowMs),
+    ...compareThreeWayDaysOff(rosters),
+    ...compareThreeWayPortMatches(rosters, portMatchWindowMs),
   ]);
 }
 
@@ -128,68 +122,79 @@ function genericMatchToLegacyMatch(match) {
   };
 }
 
-function compareGroupDaysOff(rosters) {
-  const daysOffByDate = rosters.slice(1).map((roster) =>
-    new Map(roster.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]))
-  );
+function compareThreeWayDaysOff(rosters) {
+  const [rosterA, rosterB, rosterC] = rosters;
+  const daysOffByDateB = new Map(rosterB.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
+  const daysOffByDateC = new Map(rosterC.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
   const matches = [];
 
-  for (const firstEntry of rosters[0].offDays) {
-    const key = formatSortableLocalDate(firstEntry.date);
-    const entries = [firstEntry, ...daysOffByDate.map((byDate) => byDate.get(key))];
-    if (entries.some((entry) => !entry)) {
+  for (const entryA of rosterA.offDays) {
+    const key = formatSortableLocalDate(entryA.date);
+    const entryB = daysOffByDateB.get(key);
+    const entryC = daysOffByDateC.get(key);
+    if (!entryB || !entryC) {
       continue;
     }
+
     matches.push({
-      date: formatDisplayLocalDate(firstEntry.date),
+      date: formatDisplayLocalDate(entryA.date),
       sort_date: key,
       port: formatCombinedPort(rosters.map((roster) => roster.base)),
       match_type: "Shared day off",
       match_key: "shared_day_off",
       overlap_window: "All day",
-      participants: entries.map((entry, index) => ({
-        label: `${entry.dutyCode} (${rosters[index].base || "base unknown"})`,
-        window: "All day",
-      })),
+      participants: [
+        { label: `${entryA.dutyCode} (${rosterA.base || "base unknown"})`, window: "All day" },
+        { label: `${entryB.dutyCode} (${rosterB.base || "base unknown"})`, window: "All day" },
+        { label: `${entryC.dutyCode} (${rosterC.base || "base unknown"})`, window: "All day" },
+      ],
       visual_group: "home_match",
     });
   }
+
   return matches;
 }
 
-function compareGroupPortMatches(rosters, portMatchWindowMs) {
+function compareThreeWayPortMatches(rosters, portMatchWindowMs) {
+  const [rosterA, rosterB, rosterC] = rosters;
   const matches = [];
-  // Prune a branch as soon as its common interval is too short.
-  function intersectWindows(index, windows, port, start, end) {
-    if (index === rosters.length) {
-      const overlapDate = new Date(start);
-      matches.push({
-        date: formatDisplayLocalDate(overlapDate),
-        sort_date: formatSortableLocalDate(overlapDate),
-        port,
-        match_type: "Port match",
-        match_key: "port_match",
-        overlap_window: formatWindow(new Date(start), new Date(end)),
-        participants: windows.map((window) => ({
-          label: window.dutyCode,
-          window: formatWindow(window.start, window.end),
-        })),
-        visual_group: "away_port",
-      });
-      return;
-    }
-    for (const window of rosters[index].portWindows) {
-      if (window.port !== port) continue;
-      const nextStart = Math.max(start, window.start.getTime());
-      const nextEnd = Math.min(end, window.end.getTime());
-      if (nextEnd - nextStart >= portMatchWindowMs) {
-        intersectWindows(index + 1, [...windows, window], port, nextStart, nextEnd);
+
+  for (const windowA of rosterA.portWindows) {
+    for (const windowB of rosterB.portWindows) {
+      if (windowA.port !== windowB.port) {
+        continue;
+      }
+
+      for (const windowC of rosterC.portWindows) {
+        if (windowA.port !== windowC.port) {
+          continue;
+        }
+
+        const overlapStart = Math.max(windowA.start.getTime(), windowB.start.getTime(), windowC.start.getTime());
+        const overlapEnd = Math.min(windowA.end.getTime(), windowB.end.getTime(), windowC.end.getTime());
+        if (overlapEnd - overlapStart < portMatchWindowMs) {
+          continue;
+        }
+
+        const overlapDate = new Date(overlapStart);
+        matches.push({
+          date: formatDisplayLocalDate(overlapDate),
+          sort_date: formatSortableLocalDate(overlapDate),
+          port: windowA.port,
+          match_type: "Port match",
+          match_key: "port_match",
+          overlap_window: formatWindow(new Date(overlapStart), new Date(overlapEnd)),
+          participants: [
+            { label: windowA.dutyCode, window: formatWindow(windowA.start, windowA.end) },
+            { label: windowB.dutyCode, window: formatWindow(windowB.start, windowB.end) },
+            { label: windowC.dutyCode, window: formatWindow(windowC.start, windowC.end) },
+          ],
+          visual_group: "away_port",
+        });
       }
     }
   }
-  for (const window of rosters[0].portWindows) {
-    intersectWindows(1, [window], window.port, window.start.getTime(), window.end.getTime());
-  }
+
   return matches;
 }
 
@@ -243,7 +248,7 @@ function parseLongHaulRoster(fileName, text, metadata) {
 
 function parseShortHaulRoster(fileName, text, metadata) {
   const detailData = parseShortHaulDetailBlocks(text);
-  const calendar = parseShortHaulCalendarEntries(text, detailData.blocks, metadata.generationDate);
+  const calendar = parseShortHaulCalendarEntries(text, detailData.anchorDate || metadata.generationDate);
 
   if (!calendar.length) {
     throw new Error("No calendar entries could be parsed from the roster.");
@@ -469,7 +474,7 @@ function parseShortHaulFlightDate(dateText, blockDate, previousDate) {
   return new Date(year, monthIndex, day);
 }
 
-function parseShortHaulCalendarEntries(text, blocks, generationDate) {
+function parseShortHaulCalendarEntries(text, anchorDate) {
   const entries = [];
   let capture = false;
   let activeDutyCode = null;
@@ -502,7 +507,7 @@ function parseShortHaulCalendarEntries(text, blocks, generationDate) {
     entries.push(parsed);
   }
 
-  return assignShortHaulCalendarDates(entries, resolveShortHaulCalendarStart(entries, text, blocks, generationDate));
+  return assignShortHaulCalendarDates(entries, anchorDate);
 }
 
 function parseShortHaulCalendarLine(line) {
@@ -528,65 +533,6 @@ function parseShortHaulCalendarLine(line) {
   };
 }
 
-function shortHaulWeekdaysMatch(entries, startDate) {
-  const dates = assignShortHaulCalendarDates(entries, startDate);
-  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return dates.every((entry, index) => entry.date.getDate() === entries[index].dayOfMonth && weekdays[entry.date.getDay()] === entry.rosterDay);
-}
-
-function resolveShortHaulCalendarStart(entries, text, blocks, generationDate) {
-  if (!entries.length) return generationDate;
-  // Printed period dates take precedence over flight details or export dates.
-  const heading = text.split(/Date[^\n]*Duty\(Role\)/)[0];
-  const dateToken = "(\\d{1,2}\\s*[A-Za-z]{3}\\s*\\d{2,4})";
-  const rangePattern = new RegExp(`${dateToken}\\s*(?:to|through|[-–—])\\s*${dateToken}`, "gi");
-  for (const range of heading.matchAll(rangePattern)) {
-    const start = parseShortHaulPrintedDate(range[1]);
-    const end = parseShortHaulPrintedDate(range[2]);
-    if (!start || !end || start.getDate() !== entries[0].dayOfMonth) continue;
-    const calendar = assignShortHaulCalendarDates(entries, start);
-    if (calendar.at(-1).date.getTime() === end.getTime() && shortHaulWeekdaysMatch(entries, start)) return start;
-  }
-
-  // Anchor the matching calendar row to a dated flight, then work backwards
-  // through month rollovers to the first row (which may be in the previous year).
-  const detailDates = new Set(blocks.flatMap((block) => [...block.coveredDates]));
-  for (const dateKey of detailDates) {
-    const [year, month, day] = dateKey.split("-").map(Number);
-    const anchor = new Date(year, month - 1, day);
-    for (let index = 0; index < entries.length; index += 1) {
-      if (entries[index].dayOfMonth !== day) continue;
-      let rollovers = 0;
-      for (let row = 1; row <= index; row += 1) {
-        if (entries[row].dayOfMonth < entries[row - 1].dayOfMonth) rollovers += 1;
-      }
-      const start = new Date(year, anchor.getMonth() - rollovers, entries[0].dayOfMonth);
-      const calendar = assignShortHaulCalendarDates(entries, start);
-      const calendarDates = new Set(calendar.map((entry) => formatSortableLocalDate(entry.date)));
-      if (shortHaulWeekdaysMatch(entries, start) && [...detailDates].every((key) => calendarDates.has(key))) return start;
-    }
-  }
-
-  // Rosters without flight details (for example, all leave) can still be
-  // anchored by their printed weekdays near the report's generation date.
-  const candidates = [];
-  for (const offset of [-1, 0, 1, 2]) {
-    const start = new Date(generationDate.getFullYear(), generationDate.getMonth() + offset, entries[0].dayOfMonth);
-    if (start.getDate() === entries[0].dayOfMonth && shortHaulWeekdaysMatch(entries, start)) candidates.push(start);
-  }
-  if (candidates.length === 1 && !detailDates.size) return candidates[0];
-  throw new Error("Cannot determine the short-haul roster period reliably from its dates and weekdays. Check the roster's printed period and flight details.");
-}
-
-function parseShortHaulPrintedDate(value) {
-  const match = value.match(/^(\d{1,2})\s*([A-Za-z]{3})\s*(\d{2,4})$/);
-  if (!match) return null;
-  const month = MONTH_NAMES.findIndex((name) => name.toLowerCase() === match[2].toLowerCase());
-  const year = Number(match[3]) + (match[3].length === 2 ? 2000 : 0);
-  const date = new Date(year, month, Number(match[1]));
-  return month >= 0 && date.getDate() === Number(match[1]) && date.getMonth() === month ? date : null;
-}
-
 function assignShortHaulCalendarDates(entries, anchorDate) {
   if (!entries.length) {
     return [];
@@ -597,7 +543,7 @@ function assignShortHaulCalendarDates(entries, anchorDate) {
   let previousDay = entries[0].dayOfMonth;
 
   return entries.map((entry) => {
-    if (entry.dayOfMonth < previousDay) {
+    if (entry.dayOfMonth < previousDay && previousDay - entry.dayOfMonth > 7) {
       currentMonth += 1;
       if (currentMonth > 11) {
         currentMonth = 0;
@@ -1239,8 +1185,6 @@ function buildSummary(roster) {
     staff_number: roster.staffNumber,
     base: roster.base,
     bid_period: roster.bidPeriod,
-    coverage_start: roster.coverageStart ? formatDisplayLocalDate(roster.coverageStart) : null,
-    coverage_end: roster.coverageEnd ? formatDisplayLocalDate(roster.coverageEnd) : null,
     source: roster.source,
     file_name: roster.fileName,
     off_days: roster.offDays.length,
@@ -1309,7 +1253,7 @@ function buildGroupNotes(rosters) {
   if (rosters.every((roster) => roster.coverageStart && roster.coverageEnd)) {
     if (overlapStart > overlapEnd) {
       notes.push(
-        `Roster date coverage does not overlap across all ${rosters.length} rosters (${ranges.join(" vs ")}), so dates outside each roster's range are treated as unavailable.`
+        `Roster date coverage does not overlap across all 3 rosters (${ranges.join(" vs ")}), so dates outside each roster's range are treated as unavailable.`
       );
     } else if (
       new Set(rosters.map((roster) => `${roster.coverageStart.getTime()}-${roster.coverageEnd.getTime()}`)).size > 1
