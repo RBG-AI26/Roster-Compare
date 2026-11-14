@@ -39,7 +39,7 @@ test('TSPD follows the export app Melbourne rule; credit never supplies missing 
   assert.ok(cells(marker).some(cell => cell.label === 'MEL · TSPD'));
 });
 test('SIM and other training codes retain their identity when location is missing', () => {
-  for (const code of ['SIM07CA', 'EPC', 'EPE', 'TPA', 'TPAX', 'TNR', 'PMI', 'EBT', 'TRG']) {
+  for (const code of ['EPC', 'EPE', 'TPA', 'TPAX', 'TNR', 'PMI', 'EBT', 'TRG']) {
     const roster = parse(`21/05 T ${code} AW99 0800 1200 4:00`);
     assert.equal(roster.unresolvedDuties.length, 1, code);
     assert.equal(roster.portWindows.length, 0, code);
@@ -154,4 +154,53 @@ test('SIM exercise in the detail can match a same-port definition and its timing
   assert.equal(roster.portWindows[0].port, 'BNE');
   assert.equal(roster.portWindows[0].start.getHours(), 11);
   assert.equal(roster.portWindows[0].end.getHours(), 15);
+});
+
+
+test('standalone consecutive SIM sessions use roster base, independent of domicile', () => {
+  const roster = parse('21/05 T SIM08CA Sim: 78 0615 1145 5:30\n22/05 F SIM08CB Sim: 78 0615 1145 5:30', '', 'MEL');
+  roster.domicile='ADL';
+  assert.equal(roster.unresolvedDuties.length,0);
+  assert.deepEqual(roster.calendar.map(row=>row.dutyInfo.port),['MEL','MEL']);
+  assert.ok(roster.calendar.every(row=>row.dutyInfo.locationSource.includes('without associated positioning')));
+  assert.ok(roster.portWindows.every(window=>window.port==='MEL'&&window.onDuty));
+  assert.ok(cells(roster).some(cell=>cell.label.includes('MEL · SIM')));
+  assert.ok(cells(roster).every(cell=>!cell.label.includes('Port not supplied')));
+});
+test('an untimed standalone SIM gets its base location without fabricated times', () => {
+  const roster=parse('21/05 T SIM08CA 5:30','','MEL');
+  assert.equal(roster.calendar[0].dutyInfo.port,'MEL');
+  assert.equal(roster.portWindows.length,0);
+  assert.equal(roster.unresolvedDuties.length,1);
+  assert.match(roster.unresolvedDuties[0].uncertainty,/times are missing/);
+  assert.doesNotMatch(roster.unresolvedDuties[0].uncertainty,/location/);
+});
+test('a SIM with no roster base or location remains unresolved', () => {
+  const roster=parse('21/05 T SIM08CA 0615 1145 5:30','','');
+  assert.equal(roster.base,null);
+  assert.equal(roster.calendar[0].dutyInfo.port,null);
+  assert.equal(roster.portWindows.length,0);
+});
+test('surrounding positioning sectors locate a two-day SIM visit away from base', () => {
+  const roster=parse('20/05 W P1 0800\n21/05 T SIM08CA 0615 1145\n22/05 F SIM08CB 0615 1145\n23/05 S P1', `Pattern: P1
+QF1 PAX MEL/BNE WE 0900 0200 WE 1100
+QF2 PAX BNE/MEL SA 1500 0200 SA 1700`, 'MEL');
+  assert.equal(roster.unresolvedDuties.length,0);
+  const sims=roster.calendar.filter(row=>row.dutyInfo?.kind==='sim');
+  assert.deepEqual(sims.map(row=>row.dutyInfo.port),['BNE','BNE']);
+  assert.ok(sims.every(row=>row.dutyInfo.locationSource.includes('Associated positioning')));
+});
+test('conflicting travel ports prevent an incorrect base fallback', () => {
+  const roster=parse('20/05 W P1\n21/05 T SIM08CA 0615 1145\n22/05 F P1', `Pattern: P1
+QF1 PAX MEL/BNE WE 0900 0200 WE 1100
+QF2 PAX SYD/MEL FR 1500 0200 FR 1700`, 'MEL');
+  const sim=roster.calendar.find(row=>row.dutyInfo?.kind==='sim');
+  assert.equal(sim.dutyInfo.port,null);
+  assert.ok(roster.unresolvedDuties.includes(sim));
+});
+test('unrelated flights elsewhere in the roster do not stop standalone SIM base resolution', () => {
+  const roster=parse('18/05 M P1\n21/05 T SIM08CA 0615 1145\n22/05 F SIM08CB 0615 1145\n25/05 M P1', `Pattern: P1
+QF1 PAX MEL/SYD MO 0800 0200 MO 1000
+QF2 PAX SYD/MEL MO 1200 0200 MO 1400`, 'MEL');
+  assert.ok(roster.calendar.filter(row=>row.dutyInfo?.kind==='sim').every(row=>row.dutyInfo.port==='MEL'));
 });

@@ -1,11 +1,11 @@
-const CACHE_NAME = "roster-compare-static-v12";
+const CACHE_NAME = "roster-compare-static-v14";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=20261115-2",
-  "./app.js?v=20261115-2",
-  "./roster-browser.js?v=20261115-2",
-  "./roster-calendar.js?v=20261115-2",
+  "./styles.css?v=20261115-4",
+  "./app.js?v=20261115-4",
+  "./roster-browser.js?v=20261115-4",
+  "./roster-calendar.js?v=20261115-4",
   "./manifest.json",
   "./apple-touch-icon.png",
   "./icon-192.png",

@@ -157,7 +157,7 @@ const homePort = roster => roster.requiresDomicile ? null : roster.domicile || r
 
 function comparisonWindows(roster) {
   return [...roster.portWindows, ...roster.offDays.filter(() => homePort(roster)).flatMap(entry => offDayWindows(entry).map(window => ({
-    ...window, port: homePort(roster), dutyCode: `${entry.dutyCode} (${homePort(roster)} · assumed home)`, assumed: true,
+    ...window, port: homePort(roster), dutyCode: `${entry.dutyCode} (${homePort(roster)})`, assumed: true,
   }))), ...boundaryHomeWindows(roster)];
 }
 
@@ -214,6 +214,29 @@ function dutyTimeWindow(entry) {
   return { start, end, source: "Roster report / end times" };
 }
 
+function simTravelContext(entry, calendar, trips) {
+  // Consecutive SIM days form one visit: positioning can be on the day
+  // before the first session or the day after the last session.
+  const simDates = new Set(calendar.filter(row => classifyNonFlyingDuty(row)?.kind === "sim").map(row => formatSortableLocalDate(row.date)));
+  let firstDay = entry.date, lastDay = entry.date;
+  while (simDates.has(formatSortableLocalDate(addDays(firstDay, -1)))) firstDay = addDays(firstDay, -1);
+  while (simDates.has(formatSortableLocalDate(addDays(lastDay, 1)))) lastDay = addDays(lastDay, 1);
+  const vicinityStart = addDays(firstDay, -1), vicinityEnd = addDays(lastDay, 2);
+  const blockEnd = addDays(lastDay, 1);
+  const start = validDutyTime(entry.report) ? combineDateTime(entry.date, entry.report) : entry.date;
+  const end = dutyTimeWindow(entry)?.end || (validDutyTime(entry.end) ? combineDateTime(entry.date, entry.end) : addDays(entry.date, 1));
+  const moving = [];
+  for (const trip of trips) {
+    const flights = trip.legs.filter(leg => leg.origin !== leg.destination);
+    const enclosing = flights.length && flights[0].departureDateTime < blockEnd && flights.at(-1).arrivalDateTime >= firstDay;
+    moving.push(...flights.filter(leg => enclosing || (leg.departureDateTime < vicinityEnd && leg.arrivalDateTime >= vicinityStart)));
+  }
+  const inbound = moving.filter(leg => leg.arrivalDateTime <= start).sort((a,b) => b.arrivalDateTime - a.arrivalDateTime)[0];
+  const outbound = moving.filter(leg => leg.departureDateTime >= end).sort((a,b) => a.departureDateTime - b.departureDateTime)[0];
+  const ports = [...new Set([inbound?.destination, outbound?.origin].filter(Boolean))];
+  return { hasTravel: moving.length > 0, port: ports.length === 1 ? ports[0] : null };
+}
+
 function resolveNonFlyingDuties(calendar, patterns, trips, base) {
   const portWindows = [], unresolvedDuties = [];
   const legs = trips.flatMap(trip => trip.legs);
@@ -225,7 +248,7 @@ function resolveNonFlyingDuties(calendar, patterns, trips, base) {
     entry.dutyInfo = info;
     if (info.assumeHome) continue;
     if (info.kind === "leave") {
-      info.issues = ["Leave location is not supplied; no home presence assumed."];
+      info.issues = ["Leave location is not supplied."];
       entry.uncertainty = info.issues.join(" ");
       unresolvedDuties.push(entry);
       continue;
@@ -244,6 +267,11 @@ function resolveNonFlyingDuties(calendar, patterns, trips, base) {
     if (!port) {
       const mentioned = [...new Set(String(entry.detail || "").toUpperCase().match(/\b[A-Z]{3}\b/g) || [])].filter(token => knownPorts.has(token));
       if (mentioned.length === 1) { port = mentioned[0]; locationSource = "Airport code in roster detail"; }
+    }
+    if (!port && info.kind === "sim") {
+      const travel = simTravelContext(entry, calendar, trips);
+      if (travel.port) { port = travel.port; locationSource = "Associated positioning / flight sectors"; }
+      else if (!travel.hasTravel && base) { port = base; locationSource = "Roster base: SIM without associated positioning sectors"; }
     }
     if (!port && info.kind === "reserve" && base) { port = base; locationSource = "Roster base for reserve / standby"; }
     let window = dutyTimeWindow(entry);
@@ -529,7 +557,7 @@ function boundaryHomeWindows(roster) {
   const port = homePort(roster);
   if (!port) return [];
   return (roster.homeBoundaryWindows || []).filter(window => window.anchorPorts.every(anchor => anchor === roster.base || anchor === port)).map(window => ({
-    ...window, port, assumed: true, dutyCode: `${window.dutyCode} (${port} · assumed domicile; commute not included)`,
+    ...window, port, assumed: true, dutyCode: `${window.dutyCode} (${port})`,
   }));
 }
 

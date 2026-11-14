@@ -37,7 +37,13 @@ test('15 December starts at the printed 05:30 release and extends until the othe
   assert.equal(match.port,'ADL');assert.match(match.overlap_window,/05:30/);assert.equal(match.match_type,'Shared time off');
   const calendar=buildRosterCalendar([full,b],d(1),{range:'roster'});
   const finish=calendar.weeks.flatMap(w=>w.rows[0]).find(cell=>cell.label.includes('from 05:30'));
-  assert.ok(finish);assert.match(finish.detail,/assumed domicile/i);assert.match(finish.detail,/Commute time is not included/);
+  assert.ok(finish);assert.match(finish.detail,/15 Dec 2026.*05:30/);assert.doesNotMatch(finish.detail,/assum|commute/i);
+  const bar=calendar.weeks.flatMap(w=>w.overlapLanes.flat()).find(bar=>bar.port==='ADL'&&bar.start.getTime()===d(15,5,30).getTime());
+  const detail=calendar.details[bar.detailId];
+  assert.match(detail.subtitle,/15 Dec 2026.*05:30.*19 Dec 2026.*07:45/);
+  assert.doesNotMatch(detail.text,/assum|commute|QW03|20 Dec/i);
+  assert.doesNotMatch(bar.label,/\*/);
+  assert.ok(detail.text.split('\n').every(line=>line.endsWith(' · ADL')));
   assert.ok(calendar.weeks.flatMap(w=>w.overlapLanes.flat()).some(bar=>bar.port==='ADL'&&bar.start.getTime()===d(15,5,30).getTime()));
 });
 test('start-only, end-only and credit-only fields stay in their printed columns across ARMS panels', () => {

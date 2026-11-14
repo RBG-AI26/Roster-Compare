@@ -1,5 +1,5 @@
-import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261115-2";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261115-2";
+import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261115-4";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261115-4";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const THEME_STORAGE_KEY = "roster-compare-theme";
@@ -356,7 +356,7 @@ function renderCrewList() {
         <label class="domicile-control" for="domicile-${index}">Home city / domicile
           <select id="domicile-${index}" data-domicile-index="${index}" aria-describedby="domicile-help-${index}" ${isProcessing ? "disabled" : ""}>${domicileOptions(crew)}</select>
         </label>
-        <p id="domicile-help-${index}" class="domicile-help">Days off: ${escapeHtml(crew.domicile ? `${crew.domicile} (assumed)` : "choose a capital city; no home presence assumed")}. Roster base: ${escapeHtml(crew.base || "unknown")}.</p></div>
+        <p id="domicile-help-${index}" class="domicile-help">Days off: ${escapeHtml(crew.domicile ? crew.domicile : "choose a capital city")}. Roster base: ${escapeHtml(crew.base || "unknown")}.</p></div>
         <button type="button" class="secondary-button remove-roster" data-remove-index="${index}" aria-label="Remove ${escapeHtml(name)}" ${isProcessing ? "disabled" : ""}>Remove</button>
       </div>`;
   }).join("") : '<p class="empty-state">Your crew will appear here after you add rosters.</p>';

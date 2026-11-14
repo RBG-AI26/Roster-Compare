@@ -166,7 +166,8 @@ test('calendar navigation respects coverage, persists month and opens/closes det
   assert.equal(ui.elements.get('calendar-details').hidden, false);
   assert.match(ui.elements.get('calendar-detail-title').textContent, /SYD/);
   assert.match(ui.elements.get('calendar-detail-subtitle').textContent, /Feb 2026/);
-  assert.match(ui.elements.get('calendar-detail-text').textContent, /Assumed at the selected domicile/);
+  assert.match(ui.elements.get('calendar-detail-text').textContent, /SYD/);
+  assert.doesNotMatch(ui.elements.get('calendar-detail-text').textContent, /assum|commute/i);
   ui.elements.get('calendar-detail-close').events.click();
   assert.equal(ui.elements.get('calendar-details').hidden, true);
   ui.elements.get('calendar-previous').events.click();
@@ -180,7 +181,7 @@ test('domicile changes are saved, leave base intact and recalculate matching por
   const saved=JSON.parse(ui.store.get(storageKey));
   assert.equal(saved.currentInputs.rosters[0].domicile,'ADL');
   assert.match(ui.elements.get('calendar-crew-legend').innerHTML,/Home ADL · base SYD/);
-  assert.match(ui.elements.get('calendar-grid').innerHTML,/ADL · home\*/);
+  assert.match(ui.elements.get('calendar-grid').innerHTML,/ADL · home/);
   assert.match(ui.elements.get('results-body').children.at(-1).innerHTML,/ADL \/ SYD/);
   ui.domicile(1,'ADL');
   assert.match(ui.elements.get('calendar-grid').innerHTML,/calendar-all-home/);

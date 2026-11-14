@@ -51,7 +51,7 @@ test('colliding bars stack, details flag reserve on call and roster text is esca
  assert.doesNotMatch(renderCalendarMarkup(m),/<script>/);assert.match(renderCalendarMarkup(m),/&lt;script&gt;/);
  const a=roster('A','MEL',{windows:[{...win('MEL',d(9,10),d(9,12)),matchType:'home_reserve'}]}),b=roster('B','MEL',{off:[9]});
  const reserve=buildRosterCalendar([a,b],d(1)),bar=reserve.weeks[1].overlapLanes[0][0];
- assert.match(bar.label,/on call/);assert.match(reserve.details[bar.detailId].text,/not confirmed free time/);
+ assert.match(bar.label,/on call/);assert.match(reserve.details[bar.detailId].text,/on call/);
 });
 test('long-haul parsed legs produce a sector bar spanning two days',()=>{
  const text='webCIS\nName: TEST PILOT A  Staff No: 100001\nBase: MEL\nDate: 14 Nov 2026\nDate Duty Detail\n07/12 M P1\n08/12 T P1\n09/12 W P1\nEND OF REPORT\nPattern: P1\nQF1 MEL/SIN MO 2200 0200 TU 0200\nQF2 SIN/MEL WE 1000 0800 WE 1800\n';
@@ -96,6 +96,6 @@ test('domicile changes home presence and colours while reserve remains at base',
   b.portWindows.push(win('MEL',d(10,8),d(10,12)));
   assert.ok(sharedCalendarWindows([a,b]).some(w=>w.port==='MEL'&&w.reserve));
   const model=buildRosterCalendar([a,b],d(1));
-  assert.ok(model.weeks.flatMap(w=>w.rows[0]).some(cell=>cell.label==='ADL · home*'));
+  assert.ok(model.weeks.flatMap(w=>w.rows[0]).some(cell=>cell.label==='ADL · home'));
   assert.ok(model.weeks.flatMap(w=>w.rows[0]).some(cell=>cell.label==='MEL · reserve'));
 });
