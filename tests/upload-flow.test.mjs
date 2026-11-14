@@ -36,7 +36,8 @@ function setup(saved) {
   vm.runInContext(app, context);
   return { context, elements, store, comparisonCalls: () => comparisonCalls, add: files => context.addRosterFiles(files),
     compare: () => elements.get('compare-form').events.submit({ preventDefault() {} }),
-    select(index, checked) { elements.get('crew-list').events.change({ target: { closest: () => ({ dataset: { rosterIndex: String(index) }, checked }) } }); },
+    select(index, checked) { elements.get('crew-list').events.change({ target: { closest: selector => selector === '[data-roster-index]' ? ({ dataset: { rosterIndex: String(index) }, checked }) : null } }); },
+    domicile(index, value) { elements.get('crew-list').events.change({ target: { closest: selector => selector === '[data-domicile-index]' ? ({ dataset: { domicileIndex: String(index) }, value }) : null } }); },
     remove(index) { elements.get('crew-list').events.click({ target: { closest: () => ({ dataset: { removeIndex: String(index) } }) } }); },
   };
 }
@@ -131,10 +132,10 @@ test('adding another roster immediately replaces results with the new crew selec
 test('calendar follows crew selection and clears alongside comparison results', async () => {
   const ui = setup();
   await ui.add([0, 1, 2, 3, 4].map(file));
-  assert.equal(ui.elements.get('calendar-month').textContent, 'January 2026');
-  assert.equal((ui.elements.get('calendar-grid').innerHTML.match(/class="calendar-lane calendar-pilot-lane"/g) || []).length, 25);
+  assert.equal(ui.elements.get('calendar-month').textContent, '5 Jan 2026 – 5 Jan 2026');
+  assert.equal((ui.elements.get('calendar-grid').innerHTML.match(/class="calendar-lane calendar-pilot-lane"/g) || []).length, 5);
   ui.select(1, false); ui.select(2, false); ui.select(3, false);
-  assert.equal((ui.elements.get('calendar-grid').innerHTML.match(/class="calendar-lane calendar-pilot-lane"/g) || []).length, 10);
+  assert.equal((ui.elements.get('calendar-grid').innerHTML.match(/class="calendar-lane calendar-pilot-lane"/g) || []).length, 2);
   ui.select(4, false);
   assert.equal(ui.elements.get('calendar-grid').innerHTML, '');
   ui.select(1, true);
@@ -149,7 +150,7 @@ test('calendar navigation respects coverage, persists month and opens/closes det
     value.text = value.text.replace('05/01 M A', '05/01 M A\n05/02 T A');
     return value;
   });
-  const ui = setup({ calendarMonth: '2026-01-01', currentInputs: { rosters } });
+  const ui = setup({ calendarRange: 'month', calendarMonth: '2026-01-01', currentInputs: { rosters } });
   assert.equal(ui.elements.get('calendar-previous').disabled, true);
   ui.elements.get('calendar-next').events.click();
   assert.equal(ui.elements.get('calendar-month').textContent, 'February 2026');
@@ -170,4 +171,40 @@ test('calendar navigation respects coverage, persists month and opens/closes det
   assert.equal(ui.elements.get('calendar-details').hidden, true);
   ui.elements.get('calendar-previous').events.click();
   assert.equal(ui.elements.get('calendar-month').textContent, 'January 2026');
+});
+
+test('domicile changes are saved, leave base intact and recalculate matching ports', async () => {
+  const ui=setup();await ui.add([file(0),file(1)]);
+  assert.match(ui.elements.get('crew-list').innerHTML,/Home city \/ domicile/);
+  ui.domicile(0,'ADL');
+  const saved=JSON.parse(ui.store.get(storageKey));
+  assert.equal(saved.currentInputs.rosters[0].domicile,'ADL');
+  assert.match(ui.elements.get('calendar-crew-legend').innerHTML,/Home ADL · base SYD/);
+  assert.match(ui.elements.get('calendar-grid').innerHTML,/ADL · home\*/);
+  assert.match(ui.elements.get('results-body').children.at(-1).innerHTML,/ADL \/ SYD/);
+  ui.domicile(1,'ADL');
+  assert.match(ui.elements.get('calendar-grid').innerHTML,/calendar-all-home/);
+  const restored=setup(JSON.parse(ui.store.get(storageKey)));
+  assert.match(restored.elements.get('calendar-crew-legend').innerHTML,/Home ADL · base SYD/);
+  assert.equal(restored.elements.get('compare-button').disabled,false);
+});
+
+test('read failures recover and a second successful upload enables comparison', async () => {
+  const ui=setup();let release;
+  const delayed={name:'delayed.txt',type:'text/plain',text:()=>new Promise(resolve=>release=resolve)};
+  const pending=ui.add([delayed,file(1)]);
+  assert.equal(ui.elements.get('compare-button').disabled,true);
+  release(roster(0).text);await pending;
+  assert.equal(ui.elements.get('compare-button').disabled,false);ui.compare();
+  assert.match(ui.elements.get('status').textContent,/Comparison complete/);
+  const other=setup();await other.add([file(0),{name:'bad.txt',type:'text/plain',text:async()=>{throw new Error('Read failed');}}]);
+  assert.equal(other.elements.get('compare-button').disabled,true);
+  await other.add([file(1)]);
+  assert.equal(other.elements.get('compare-button').disabled,false);
+});
+
+test('crew summaries retain imported coverage dates', async () => {
+  const ui=setup();await ui.add([file(0),file(1)]);
+  assert.match(ui.elements.get('summary-row').innerHTML,/05\/01\/2026/);
+  assert.doesNotMatch(ui.elements.get('summary-row').innerHTML,/Dates: Unknown/);
 });

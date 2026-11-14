@@ -71,3 +71,31 @@ test('initial month favours the main roster period over a one-day leading month'
  const b=roster('B','MEL');b.coverageStart=new Date(2027,0,1);b.coverageEnd=new Date(2027,0,31);
  assert.equal(dateKey(initialCalendarMonth([a,b])),'2026-11-01');
 });
+test('full roster view includes all eight weeks, including four-column ARMS rows', () => {
+  const start=new Date(2026,10,2), rows=[];
+  const codes=['S','M','T','W','T','F','S'];
+  for(let row=0;row<14;row++) rows.push(Array.from({length:4},(_,column)=>{
+    const date=new Date(start);date.setDate(date.getDate()+column*14+row);
+    return `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')} ${codes[date.getDay()]} A`;
+  }).join(' | '));
+  const text=`ARMS\nName: TEST PILOT A Staff No: 123456\nBase: MEL\nDate: 14 Nov 2026\nDate Duty Detail\n${rows.join('\n')}\nEND OF REPORT`;
+  const a=parseRosterText('arms.txt',text);
+  assert.equal(a.calendar.length,56);
+  assert.equal(dateKey(a.coverageEnd),'2026-12-27');
+  const model=buildRosterCalendar([a,a],new Date(2026,10,1),{range:'roster'});
+  assert.equal(model.weeks.length,8);
+  assert.equal(model.dayCount,56);
+  assert.equal(dateKey(model.weeks.at(-1).dates.at(-1)),'2026-12-27');
+});
+test('domicile changes home presence and colours while reserve remains at base',()=>{
+  const a=roster('A','MEL',{off:[9]}),b=roster('B','ADL',{off:[9]});a.domicile='ADL';
+  const shared=sharedCalendarWindows([a,b]);
+  assert.equal(shared[0].port,'ADL');assert.equal(shared[0].category,'all-home');
+  a.reserveDays=[a.calendar.find(e=>dateKey(e.date)==='2026-12-10')];
+  a.portWindows.push({...win('MEL',d(10,5),d(10,17)),matchType:'home_reserve'});
+  b.portWindows.push(win('MEL',d(10,8),d(10,12)));
+  assert.ok(sharedCalendarWindows([a,b]).some(w=>w.port==='MEL'&&w.reserve));
+  const model=buildRosterCalendar([a,b],d(1));
+  assert.ok(model.weeks.flatMap(w=>w.rows[0]).some(cell=>cell.label==='ADL · home*'));
+  assert.ok(model.weeks.flatMap(w=>w.rows[0]).some(cell=>cell.label==='MEL · reserve'));
+});

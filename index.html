@@ -7,7 +7,7 @@
       name="description"
       content="Load up to five crew rosters and choose who to compare, locally on your device."
     />
-    <meta name="theme-color" content="#f3eee2" />
+    <meta name="theme-color" content="#080b10" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Roster Compare" />
@@ -16,13 +16,13 @@
     <link rel="manifest" href="./manifest.json" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=20261114-4" />
+    <link rel="stylesheet" href="./styles.css?v=20261114-5" />
   </head>
   <body>
     <main class="shell">
       <section class="hero">
         <p class="eyebrow">Roster Compare</p>
-        <h1>Load your rosters. Choose your crew.</h1>
+        <h1>Roster <span class="hero-accent">Overlap</span></h1>
       </section>
 
       <form id="compare-form" class="roster-setup">
@@ -70,18 +70,19 @@
         <article class="roster-calendar" aria-labelledby="calendar-month">
           <div class="calendar-toolbar">
             <button id="calendar-previous" class="calendar-nav" type="button" aria-label="Previous month">←</button>
-            <h2 id="calendar-month"></h2>
+            <div class="calendar-heading"><h2 id="calendar-month"></h2><p id="calendar-range-summary" class="calendar-help"></p></div>
+            <label class="calendar-range-control" for="calendar-range">Calendar range<select id="calendar-range"><option value="roster">Full roster</option><option value="month">Month</option></select></label>
             <button id="calendar-next" class="calendar-nav" type="button" aria-label="Next month">→</button>
           </div>
           <div id="calendar-crew-legend" class="calendar-crew-legend"></div>
-          <p class="calendar-help">Pilot rows show trips and home days. Highlighted bars show time in the same port for everyone selected; click for exact times. Dates and times follow the roster’s local dates. * Assumed presence at home base on a day off. Reserve means on call. Shared days off at different bases appear in the table below.</p>
+          <p class="calendar-help">Pilot rows show trips and home days. Highlighted bars show time in the same port for everyone selected; click for exact times. Dates and times follow the roster’s local dates. * Assumed presence at the selected domicile on a day off. Reserve means on call. Shared days off at different domiciles appear in the table below.</p>
           <div class="calendar-legend" aria-label="Shared-time colours">
-            <span class="calendar-all-home">Everyone’s home base</span>
-            <span class="calendar-some-home">Someone’s home base</span>
+            <span class="calendar-all-home">Everyone’s home city</span>
+            <span class="calendar-some-home">Someone’s home city</span>
             <span class="calendar-all-away">Away for everyone</span>
           </div>
           <div class="calendar-scroll" tabindex="0" role="region" aria-label="Roster calendar, scroll horizontally on smaller screens">
-            <div id="calendar-grid" class="calendar-grid" role="table" aria-label="Monthly pilot rosters and shared time"></div>
+            <div id="calendar-grid" class="calendar-grid" role="table" aria-label="Pilot rosters and shared time"></div>
           </div>
           <section id="calendar-details" class="calendar-details" aria-live="polite" hidden>
             <div class="calendar-detail-heading"><h3 id="calendar-detail-title"></h3><button id="calendar-detail-close" class="calendar-nav" type="button" aria-label="Close calendar details">×</button></div>
@@ -116,6 +117,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js?v=20261114-4"></script>
+    <script type="module" src="./app.js?v=20261114-5"></script>
   </body>
 </html>

@@ -19,11 +19,17 @@ const MATCH_SORT_ORDER = new Map([
 ]);
 
 export function compareRosterGroupTexts(rosterInputs, options = {}) {
-  if (!Array.isArray(rosterInputs) || rosterInputs.length < 2 || rosterInputs.length > 3) {
-    throw new Error("Comparison supports 2 or 3 rosters.");
+  if (!Array.isArray(rosterInputs) || rosterInputs.length < 2 || rosterInputs.length > 5) {
+    throw new Error("Select between 2 and 5 rosters to compare.");
   }
 
-  const rosters = rosterInputs.map((rosterInput) => parseRosterText(rosterInput.fileName, rosterInput.text));
+  return compareRosterGroup(rosterInputs.map((input) => parseRosterText(input.fileName, input.text)), options);
+}
+
+export function compareRosterGroup(rosters, options = {}) {
+  if (!Array.isArray(rosters) || rosters.length < 2 || rosters.length > 5) {
+    throw new Error("Select between 2 and 5 rosters to compare.");
+  }
   const portMatchWindowMs =
     options.minPortOverlapMinutes != null
       ? Math.max(1, Number(options.minPortOverlapMinutes || 60)) * 60 * 1000
@@ -32,7 +38,7 @@ export function compareRosterGroupTexts(rosterInputs, options = {}) {
   const matches = (
     rosters.length === 2
       ? buildTwoRosterMatches(rosters[0], rosters[1], portMatchWindowMs)
-      : buildThreeRosterMatches(rosters, portMatchWindowMs)
+      : buildGroupRosterMatches(rosters, portMatchWindowMs)
   ).sort((left, right) => {
     const prioritySort = (MATCH_SORT_ORDER.get(left.match_key) ?? 99) - (MATCH_SORT_ORDER.get(right.match_key) ?? 99);
     if (prioritySort !== 0) {
@@ -78,15 +84,15 @@ function buildTwoRosterMatches(rosterA, rosterB, portMatchWindowMs) {
     [
       ...compareDaysOff(rosterA, rosterB),
       ...compareReserveDays(rosterA, rosterB),
-      ...comparePortMatches(rosterA, rosterB, portMatchWindowMs),
+      ...compareGroupPortMatches([rosterA, rosterB], portMatchWindowMs).map(genericMatchToLegacyMatch),
     ].map(legacyMatchToGenericMatch)
   );
 }
 
-function buildThreeRosterMatches(rosters, portMatchWindowMs) {
+function buildGroupRosterMatches(rosters, portMatchWindowMs) {
   return dedupeMatches([
-    ...compareThreeWayDaysOff(rosters),
-    ...compareThreeWayPortMatches(rosters, portMatchWindowMs),
+    ...compareGroupDaysOff(rosters),
+    ...compareGroupPortMatches(rosters, portMatchWindowMs),
   ]);
 }
 
@@ -122,79 +128,46 @@ function genericMatchToLegacyMatch(match) {
   };
 }
 
-function compareThreeWayDaysOff(rosters) {
-  const [rosterA, rosterB, rosterC] = rosters;
-  const daysOffByDateB = new Map(rosterB.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
-  const daysOffByDateC = new Map(rosterC.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
-  const matches = [];
-
-  for (const entryA of rosterA.offDays) {
-    const key = formatSortableLocalDate(entryA.date);
-    const entryB = daysOffByDateB.get(key);
-    const entryC = daysOffByDateC.get(key);
-    if (!entryB || !entryC) {
-      continue;
-    }
-
-    matches.push({
-      date: formatDisplayLocalDate(entryA.date),
-      sort_date: key,
-      port: formatCombinedPort(rosters.map((roster) => roster.base)),
-      match_type: "Shared day off",
-      match_key: "shared_day_off",
-      overlap_window: "All day",
-      participants: [
-        { label: `${entryA.dutyCode} (${rosterA.base || "base unknown"})`, window: "All day" },
-        { label: `${entryB.dutyCode} (${rosterB.base || "base unknown"})`, window: "All day" },
-        { label: `${entryC.dutyCode} (${rosterC.base || "base unknown"})`, window: "All day" },
-      ],
-      visual_group: "home_match",
-    });
-  }
-
-  return matches;
+function compareGroupDaysOff(rosters) {
+  const others = rosters.slice(1).map(roster => new Map(roster.offDays.map(entry => [formatSortableLocalDate(entry.date), entry])));
+  return rosters[0].offDays.flatMap(first => {
+    const entries = [first, ...others.map(byDate => byDate.get(formatSortableLocalDate(first.date)))];
+    if (entries.some(entry => !entry)) return [];
+    return [{ date: formatDisplayLocalDate(first.date), sort_date: formatSortableLocalDate(first.date),
+      port: formatCombinedPort(rosters.map(homePort)), match_type: "Shared day off", match_key: "shared_day_off", overlap_window: "All day",
+      participants: entries.map((entry, index) => ({ label: `${entry.dutyCode} (${homePort(rosters[index]) || "home unknown"})`, window: "All day" })), visual_group: "home_match" }];
+  });
 }
 
-function compareThreeWayPortMatches(rosters, portMatchWindowMs) {
-  const [rosterA, rosterB, rosterC] = rosters;
-  const matches = [];
+const homePort = roster => roster.domicile || roster.base;
 
-  for (const windowA of rosterA.portWindows) {
-    for (const windowB of rosterB.portWindows) {
-      if (windowA.port !== windowB.port) {
-        continue;
-      }
+function comparisonWindows(roster) {
+  return [...roster.portWindows, ...roster.offDays.filter(() => homePort(roster)).map(entry => ({
+    start: entry.date, end: addDays(entry.date, 1), port: homePort(roster), dutyCode: `${entry.dutyCode} (${homePort(roster)} · assumed home)`, assumed: true,
+  }))];
+}
 
-      for (const windowC of rosterC.portWindows) {
-        if (windowA.port !== windowC.port) {
-          continue;
-        }
-
-        const overlapStart = Math.max(windowA.start.getTime(), windowB.start.getTime(), windowC.start.getTime());
-        const overlapEnd = Math.min(windowA.end.getTime(), windowB.end.getTime(), windowC.end.getTime());
-        if (overlapEnd - overlapStart < portMatchWindowMs) {
-          continue;
-        }
-
-        const overlapDate = new Date(overlapStart);
-        matches.push({
-          date: formatDisplayLocalDate(overlapDate),
-          sort_date: formatSortableLocalDate(overlapDate),
-          port: windowA.port,
-          match_type: "Port match",
-          match_key: "port_match",
-          overlap_window: formatWindow(new Date(overlapStart), new Date(overlapEnd)),
-          participants: [
-            { label: windowA.dutyCode, window: formatWindow(windowA.start, windowA.end) },
-            { label: windowB.dutyCode, window: formatWindow(windowB.start, windowB.end) },
-            { label: windowC.dutyCode, window: formatWindow(windowC.start, windowC.end) },
-          ],
-          visual_group: "away_port",
-        });
-      }
+function compareGroupPortMatches(rosters, portMatchWindowMs) {
+  const matches = [], windows = rosters.map(comparisonWindows);
+  function intersect(index, port, start, end, participants) {
+    if (index === rosters.length) {
+      // Shared days off already have a dedicated result; avoid duplicating them.
+      if (participants.every(window => window.assumed)) return;
+      if (rosters.length === 2 && participants.some(window => window.matchType === "home_reserve") && participants.some(window => window.assumed)) return;
+      const date = new Date(start);
+      matches.push({ date: formatDisplayLocalDate(date), sort_date: formatSortableLocalDate(date), port,
+        match_type: "Port match", match_key: "port_match", overlap_window: formatWindow(date, new Date(end)),
+        participants: participants.map(window => ({ label: window.dutyCode, window: formatWindow(window.start, window.end) })),
+        visual_group: rosters.some(roster => homePort(roster) === port) ? "home_match" : "away_port" });
+      return;
+    }
+    for (const window of windows[index]) {
+      if (window.port !== port) continue;
+      const a = Math.max(start, window.start.getTime()), b = Math.min(end, window.end.getTime());
+      if (b - a >= portMatchWindowMs) intersect(index + 1, port, a, b, [...participants, window]);
     }
   }
-
+  for (const window of windows[0]) intersect(1, window.port, window.start.getTime(), window.end.getTime(), [window]);
   return matches;
 }
 
@@ -203,7 +176,7 @@ export function parseRosterText(fileName, rawText) {
   const source = detectSource(fileName, text);
   const metadata = {
     crewName: extractCrewName(text, source) || "Unknown",
-    staffNumber: matchGroup(text, /Staff No:\s*(\d+)/m),
+    staffNumber: matchGroup(text, /Staff\s*(?:No\.?|Number)\s*:\s*(\d+)/im),
     base: matchGroup(text, /Base\s*:\s*([A-Z]{3})/m),
     bidPeriod: matchGroup(text, /Bid Period\s+(\d+)/im),
     source,
@@ -248,7 +221,7 @@ function parseLongHaulRoster(fileName, text, metadata) {
 
 function parseShortHaulRoster(fileName, text, metadata) {
   const detailData = parseShortHaulDetailBlocks(text);
-  const calendar = parseShortHaulCalendarEntries(text, detailData.anchorDate || metadata.generationDate);
+  const calendar = parseShortHaulCalendarEntries(text, detailData.blocks, metadata.generationDate);
 
   if (!calendar.length) {
     throw new Error("No calendar entries could be parsed from the roster.");
@@ -299,6 +272,7 @@ function buildRosterRecord({
     displayName: buildDisplayName(crewName, source),
     staffNumber,
     base,
+    domicile: base,
     bidPeriod,
     source,
     fileName,
@@ -474,7 +448,7 @@ function parseShortHaulFlightDate(dateText, blockDate, previousDate) {
   return new Date(year, monthIndex, day);
 }
 
-function parseShortHaulCalendarEntries(text, anchorDate) {
+function parseShortHaulCalendarEntries(text, blocks, generationDate) {
   const entries = [];
   let capture = false;
   let activeDutyCode = null;
@@ -507,7 +481,7 @@ function parseShortHaulCalendarEntries(text, anchorDate) {
     entries.push(parsed);
   }
 
-  return assignShortHaulCalendarDates(entries, anchorDate);
+  return assignShortHaulCalendarDates(entries, resolveShortHaulCalendarStart(entries, text, blocks, generationDate));
 }
 
 function parseShortHaulCalendarLine(line) {
@@ -531,6 +505,44 @@ function parseShortHaulCalendarLine(line) {
     code: line.slice(76).trim() || null,
     service: line.slice(20, 48).trim() || null,
   };
+}
+
+function parseShortHaulPrintedDate(value) {
+  const m = value.trim().match(/^(\d{1,2})\s*([A-Za-z]{3})\s*(\d{2}|\d{4})$/);
+  if (!m) return null;
+  const month = MONTH_NAMES.findIndex(name => name.toLowerCase() === m[2].toLowerCase());
+  if (month < 0) return null;
+  return new Date(m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]), month, Number(m[1]));
+}
+
+function shortHaulWeekdaysMatch(entries, start) {
+  const calendar = assignShortHaulCalendarDates(entries, start);
+  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return calendar.every((entry, index) => entry.date.getDate() === entries[index].dayOfMonth && names[entry.date.getDay()] === entry.rosterDay);
+}
+
+function resolveShortHaulCalendarStart(entries, text, blocks, generationDate) {
+  if (!entries.length) return generationDate;
+  const fail = () => { throw new Error("Cannot determine the short-haul roster period reliably. Check the printed dates and weekdays."); };
+  const printed = text.match(/(\d{1,2}\s*[A-Za-z]{3}\s*\d{2,4})\s*[-–]\s*(\d{1,2}\s*[A-Za-z]{3}\s*\d{2,4})/);
+  const available = text.match(/Available Date\/Time this.*?:\s*(\d{2}[A-Za-z]{3}\d{2})/i);
+  const explicit = printed ? parseShortHaulPrintedDate(printed[1]) : available ? parseShortHaulPrintedDate(available[1]) : null;
+  if (explicit) {
+    if (explicit.getDate() !== entries[0].dayOfMonth || !shortHaulWeekdaysMatch(entries, explicit)) return fail();
+    return explicit;
+  }
+  const candidates = new Map();
+  for (const anchor of [generationDate, ...blocks.map(block => block.startDate)]) {
+    for (let offset = -13; offset <= 13; offset++) {
+      const date = new Date(anchor.getFullYear(), anchor.getMonth() + offset, entries[0].dayOfMonth);
+      if (date.getDate() !== entries[0].dayOfMonth || !shortHaulWeekdaysMatch(entries, date)) continue;
+      const calendar = assignShortHaulCalendarDates(entries, date);
+      const evidence = blocks.reduce((count, block) => count + calendar.filter(entry => block.coveredDates.has(formatSortableLocalDate(entry.date)) && (entry.dutyCode === block.code || (entry.service && serviceCodesResolved(entry.service, block.servicesByDate.get(formatSortableLocalDate(entry.date)))))).length, 0);
+      candidates.set(date.getTime(), { date, evidence });
+    }
+  }
+  const choices = [...candidates.values()].filter(candidate => !blocks.length || candidate.evidence > 0).sort((a, b) => b.evidence - a.evidence || Math.abs(a.date - generationDate) - Math.abs(b.date - generationDate));
+  return choices[0]?.date || fail();
 }
 
 function assignShortHaulCalendarDates(entries, anchorDate) {
@@ -651,7 +663,7 @@ function addValueToSetMap(target, key, value) {
 }
 
 function normalizeText(rawText) {
-  return rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  return rawText.replace(/\uFEFF/g, "").replace(/\u00a0/g, " ").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 function detectSource(fileName, text) {
@@ -669,15 +681,9 @@ function detectSource(fileName, text) {
   return "text";
 }
 
-function extractCrewName(text, source) {
-  if (source === "webcis-short-haul") {
-    return matchGroup(text, /Name\s*:\s*([A-Z][A-Z\s'\-]+?)(?=\s{2,}Category\s*:|$)/m);
-  }
-
-  return (
-    matchGroup(text, /Name:\s*([A-Z][A-Z\s'\-]+?)(?=\s{2,}Staff No:|$)/m) ||
-    matchGroup(text, /Name\s*:\s*([A-Z][A-Z\s'\-]+?)(?=\s{2,}Category\s*:|$)/m)
-  );
+function extractCrewName(text) {
+  const line = text.match(/^\s*Name\s*:\s*([^\n]+)/im)?.[1];
+  return line ? line.split(/\s+(?:Staff\s*(?:No\.?|Number)|Category)\s*:/i)[0].trim() : null;
 }
 
 function buildDisplayName(crewName, source) {
@@ -736,14 +742,14 @@ function extractTimeField(value) {
 }
 
 function parseCalendarEntries(text, generationDate) {
-  const columns = [[], [], []];
+  const columns = [];
   let capture = false;
   const lineRegex = /(?<date>\d{2}\/\d{2})\s+(?<dow>[MTWFSU])\s+(?<duty>[A-Z0-9]+)(?<rest>.*)/;
 
   for (const rawLine of text.split("\n")) {
     const line = rawLine.replace(/\s+$/, "");
 
-    if (line.startsWith("Date") && line.includes("Duty") && line.includes("Detail")) {
+    if (/^\s*Date\b/i.test(line) && /Duty/i.test(line) && /Detail/i.test(line)) {
       capture = true;
       continue;
     }
@@ -763,7 +769,8 @@ function parseCalendarEntries(text, generationDate) {
         return;
       }
       const parsedRest = parseCalendarRest(match.groups.rest.trim());
-      columns[Math.min(index, 2)].push({
+      if (!columns[index]) columns[index] = [];
+      columns[index].push({
         dateText: match.groups.date,
         rosterDay: match.groups.dow,
         dutyCode: match.groups.duty,
@@ -1062,12 +1069,12 @@ function compareDaysOff(rosterA, rosterB) {
     matches.push({
       date: formatDisplayLocalDate(entryA.date),
       sort_date: key,
-      port: rosterA.base && rosterA.base === rosterB.base ? rosterA.base : `${rosterA.base || "?"} / ${rosterB.base || "?"}`,
+      port: formatHomePort(homePort(rosterA), homePort(rosterB)),
       match_type: "Shared day off",
       match_key: "shared_day_off",
       overlap_window: "All day",
-      crew_a: `${entryA.dutyCode} (${rosterA.base || "base unknown"})`,
-      crew_b: `${entryB.dutyCode} (${rosterB.base || "base unknown"})`,
+      crew_a: `${entryA.dutyCode} (${homePort(rosterA) || "home unknown"})`,
+      crew_b: `${entryB.dutyCode} (${homePort(rosterB) || "home unknown"})`,
       window_a: "All day",
       window_b: "All day",
       visual_group: "home_match",
@@ -1089,16 +1096,17 @@ function compareReserveDays(rosterA, rosterB) {
       continue;
     }
 
+    if (!rosterA.base || rosterA.base !== homePort(rosterB)) continue;
     const reserveWindow = buildReserveWindow(reserveEntry);
     matches.push({
       date: formatDisplayLocalDate(reserveEntry.date),
       sort_date: key,
-      port: formatHomePort(rosterA.base, rosterB.base),
+      port: rosterA.base,
       match_type: "Reserve at base",
       match_key: "reserve_at_base",
       overlap_window: formatWindow(reserveWindow.start, reserveWindow.end),
       crew_a: `${reserveEntry.dutyCode} (${rosterA.base || "base unknown"})`,
-      crew_b: `${offDayEntry.dutyCode} (${rosterB.base || "base unknown"})`,
+      crew_b: `${offDayEntry.dutyCode} (${homePort(rosterB) || "home unknown"})`,
       window_a: formatWindow(reserveWindow.start, reserveWindow.end),
       window_b: "All day",
       visual_group: "home_match",
@@ -1112,15 +1120,16 @@ function compareReserveDays(rosterA, rosterB) {
       continue;
     }
 
+    if (!rosterB.base || rosterB.base !== homePort(rosterA)) continue;
     const reserveWindow = buildReserveWindow(reserveEntry);
     matches.push({
       date: formatDisplayLocalDate(reserveEntry.date),
       sort_date: key,
-      port: formatHomePort(rosterA.base, rosterB.base),
+      port: rosterB.base,
       match_type: "Reserve at base",
       match_key: "reserve_at_base",
       overlap_window: formatWindow(reserveWindow.start, reserveWindow.end),
-      crew_a: `${offDayEntry.dutyCode} (${rosterA.base || "base unknown"})`,
+      crew_a: `${offDayEntry.dutyCode} (${homePort(rosterA) || "home unknown"})`,
       crew_b: `${reserveEntry.dutyCode} (${rosterB.base || "base unknown"})`,
       window_a: "All day",
       window_b: formatWindow(reserveWindow.start, reserveWindow.end),
@@ -1184,6 +1193,9 @@ function buildSummary(roster) {
     display_name: roster.displayName,
     staff_number: roster.staffNumber,
     base: roster.base,
+    domicile: homePort(roster),
+    coverage_start: roster.coverageStart ? formatDisplayLocalDate(roster.coverageStart) : null,
+    coverage_end: roster.coverageEnd ? formatDisplayLocalDate(roster.coverageEnd) : null,
     bid_period: roster.bidPeriod,
     source: roster.source,
     file_name: roster.fileName,
@@ -1205,8 +1217,8 @@ function buildNotes(rosterA, rosterB) {
   if (rosterB.unresolvedDuties.length) {
     notes.push(`${rosterB.crewName}: ${rosterB.unresolvedDuties.length} duty entries were treated as uncertain.`);
   }
-  if (rosterA.base !== rosterB.base) {
-    notes.push(`Home bases differ (${rosterA.base || "?"} vs ${rosterB.base || "?"}), so shared days off may not mean the same physical port.`);
+  if (homePort(rosterA) !== homePort(rosterB)) {
+    notes.push(`Domiciles differ (${homePort(rosterA) || "?"} vs ${homePort(rosterB) || "?"}), so shared days off may not mean the same physical port.`);
   }
   const overlapStart = Math.max(rosterA.coverageStart?.getTime() || 0, rosterB.coverageStart?.getTime() || 0);
   const overlapEnd = Math.min(rosterA.coverageEnd?.getTime() || 0, rosterB.coverageEnd?.getTime() || 0);
@@ -1242,9 +1254,9 @@ function buildGroupNotes(rosters) {
     }
   }
 
-  const bases = rosters.map((roster) => roster.base || "?");
+  const bases = rosters.map((roster) => homePort(roster) || "?");
   if (new Set(bases).size > 1) {
-    notes.push(`Home bases differ (${bases.join(" vs ")}), so shared home-based availability may not mean the same physical port.`);
+    notes.push(`Domiciles differ (${bases.join(" vs ")}), so shared home-based availability may not mean the same physical port.`);
   }
 
   const overlapStart = Math.max(...rosters.map((roster) => roster.coverageStart?.getTime() || 0));
@@ -1253,7 +1265,7 @@ function buildGroupNotes(rosters) {
   if (rosters.every((roster) => roster.coverageStart && roster.coverageEnd)) {
     if (overlapStart > overlapEnd) {
       notes.push(
-        `Roster date coverage does not overlap across all 3 rosters (${ranges.join(" vs ")}), so dates outside each roster's range are treated as unavailable.`
+        `Roster date coverage does not overlap across all ${rosters.length} rosters (${ranges.join(" vs ")}), so dates outside each roster's range are treated as unavailable.`
       );
     } else if (
       new Set(rosters.map((roster) => `${roster.coverageStart.getTime()}-${roster.coverageEnd.getTime()}`)).size > 1

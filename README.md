@@ -18,7 +18,9 @@ Browser-only web app for loading up to five crew roster text files and comparing
 - Compares same-port shared time using a configurable minutes-in-port threshold
 - Marks unresolved duties as uncertain
 - Displays a Monday-first month calendar with coloured pilot rows, multi-day trip bars and shared-port highlights
-- Opens the month containing most of the common roster period, with previous/next navigation and a saved month selection
+- Opens the complete roster period, including all eight weeks of a 56-day roster; optional month view retains previous/next navigation
+- Set a home city / domicile for each pilot; days off use that port and reserve duties remain at the roster base
+- Uses a dark navy theme with blue actions, coloured crew cards and orange/purple highlights
 - Shows exact flight and overlap times when a calendar bar is clicked; smaller screens can scroll the calendar horizontally
 
 PDF support is intentionally out of scope for this version. Two-crew comparisons retain reserve-at-base matching; comparisons of three to five crew show shared days off and common port windows.
@@ -31,9 +33,9 @@ If you want to run it locally without deploying, serve the repository as a stati
 
 ## Calendar
 
-The calendar appears above the comparison table. It updates with the selected crew and the port-match threshold. Green bars indicate a shared port that is everyone's base, purple indicates one or more crew's bases, and blue indicates an away port for everyone. Every selected pilot must share the highlighted port window.
+The calendar appears above the comparison table. Full roster is the default and covers the union of the selected rosters' dates, with no six-week limit. Use Calendar range to switch to Month view. The range and displayed month are saved on the device. It updates with the selected crew and the port-match threshold. Green bars indicate a shared port that is everyone's domicile, purple indicates one or more crew's domiciles, and blue indicates an away port for everyone. Every selected pilot must share the highlighted port window.
 
-A day off is assumed to be spent at the pilot's roster base and marked with `*`; actual home location is not separately configured. Unknown duties and missing roster dates never imply a location. Reserve windows are labelled **on call** and do not mean free time. Days off at different bases remain in the comparison table but do not create a shared-port calendar bar.
+Each crew card has a Home city / domicile selector, defaulting to the roster base. A day off is assumed to be spent at the selected domicile and marked with `*`. Changing domicile immediately recalculates both the calendar and comparison table and saves the setting with that roster. Reserve duties retain their base location. No commute is inferred. Unknown duties and missing roster dates never imply a location. Reserve windows are labelled **on call** and do not mean free time. Days off at different domiciles remain in the comparison table but do not create a shared-port calendar bar.
 
 The calendar uses the existing parser's roster-local wall dates and times; it does not add time-zone conversion or turn the times into UTC instants. Bars cover each touched calendar date; click to see their exact times.
 
@@ -59,6 +61,6 @@ This repo now includes a root `index.html`, so it can be hosted directly as a st
 
 ## Validation
 
-Run `node --test tests/*.test.mjs` for comparison and upload/state regression checks. Upload/state checks use a small DOM adapter; they do not replace browser layout and interaction checks.
+Run `node --test tests/*.test.mjs` for module-export, comparison, date-resolution, calendar and upload/state regression checks. The module-startup check verifies that every named browser import is actually exported, preventing the startup failure that left import and Compare inactive. Upload/state checks use a small DOM adapter; they do not replace browser layout and interaction checks.
 
 Application scripts and styles use matching release URLs to prevent a refreshed upload screen from reusing an older comparison engine. The service worker revalidates network requests and retains an offline copy of the current release. When updating these files, keep their release values aligned in `index.html`, `app.js` and `service-worker.js`.

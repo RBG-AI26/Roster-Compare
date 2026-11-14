@@ -1,13 +1,15 @@
 :root {
-  --bg: #f3eee2;
-  --panel: rgba(255, 251, 244, 0.94);
-  --text: #201613;
-  --muted: #66514a;
-  --line: rgba(90, 67, 56, 0.16);
-  --accent: #0f6c5c;
-  --accent-strong: #0a4d42;
-  --warm: #c56b3d;
-  --shadow: 0 20px 60px rgba(62, 36, 21, 0.12);
+  color-scheme: dark;
+  --bg: #080b10;
+  --panel: #0f1219;
+  --surface2: #161b24;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --line: #232a38;
+  --accent: #38bdf8;
+  --accent-strong: #7dd3fc;
+  --warm: #fb923c;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
 }
 
 * {
@@ -20,8 +22,8 @@ body {
   font-family: "Avenir Next", "Segoe UI", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(197, 107, 61, 0.18), transparent 30%),
-    linear-gradient(180deg, #f9f2e4 0%, #efe7d8 100%);
+    radial-gradient(ellipse at top left, rgba(56, 189, 248, 0.035), transparent 55%),
+    var(--bg);
 }
 
 .shell {
@@ -45,7 +47,7 @@ body {
 h1,
 h2 {
   margin: 0;
-  font-family: "Georgia", "Times New Roman", serif;
+  font-family: inherit;
   font-weight: 600;
 }
 
@@ -83,7 +85,7 @@ li {
 .results-card {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 14px;
   box-shadow: var(--shadow);
   backdrop-filter: blur(10px);
 }
@@ -99,9 +101,9 @@ li {
   gap: 10px;
   margin-top: 18px;
   padding: 22px;
-  border: 1.5px dashed rgba(15, 108, 92, 0.35);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(15, 108, 92, 0.06), rgba(255, 255, 255, 0.65));
+  border: 1.5px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 10px;
+  background: var(--surface2);
   cursor: pointer;
   min-height: 132px;
 }
@@ -157,8 +159,8 @@ li {
   min-width: 220px;
   padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(255, 251, 244, 0.82);
+  border-radius: 10px;
+  background: var(--panel);
 }
 
 .control-card span {
@@ -171,9 +173,9 @@ li {
 
 .control-card input {
   width: 100%;
-  border: 1px solid rgba(90, 67, 56, 0.22);
+  border: 1px solid #2d3548;
   border-radius: 12px;
-  background: white;
+  background: var(--surface2);
   padding: 12px 14px;
   font-size: 1rem;
   color: var(--text);
@@ -181,20 +183,20 @@ li {
 
 button {
   border: 0;
-  border-radius: 999px;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-  color: white;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
   padding: 14px 24px;
   min-height: 52px;
   font-size: 1rem;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 18px 40px rgba(10, 77, 66, 0.22);
+  box-shadow: 0 8px 22px rgba(56, 189, 248, 0.12);
 }
 
 .secondary-button {
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(15, 108, 92, 0.16);
+  background: var(--surface2);
+  border: 1px solid #2d3548;
   color: var(--accent-strong);
   box-shadow: none;
 }
@@ -237,15 +239,15 @@ button:disabled {
 .filter-chip {
   min-height: 40px;
   padding: 10px 14px;
-  border: 1px solid rgba(15, 108, 92, 0.16);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid #2d3548;
+  background: var(--surface2);
   color: var(--accent-strong);
   box-shadow: none;
 }
 
 .filter-chip.is-active {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-  color: white;
+  background: var(--accent);
+  color: var(--bg);
 }
 
 .table-wrap {
@@ -274,18 +276,18 @@ th {
 }
 
 tbody tr.away-port-row {
-  background: rgba(15, 108, 92, 0.05);
+  background: rgba(56, 189, 248, 0.04);
 }
 
 tbody tr.home-match-row {
-  background: rgba(197, 107, 61, 0.06);
+  background: rgba(167, 139, 250, 0.04);
 }
 
 .pill {
   display: inline-block;
   padding: 5px 10px;
-  border-radius: 999px;
-  background: rgba(197, 107, 61, 0.12);
+  border-radius: 8px;
+  background: rgba(251, 146, 60, 0.10);
   color: var(--warm);
   font-size: 0.82rem;
   font-weight: 700;
@@ -358,7 +360,7 @@ tbody tr.home-match-row {
     position: sticky;
     bottom: 0;
     padding: 12px 0 4px;
-    background: linear-gradient(180deg, rgba(243, 238, 226, 0), rgba(243, 238, 226, 0.96) 32%);
+    background: linear-gradient(180deg, transparent, var(--bg) 32%);
   }
 
   button,
@@ -374,7 +376,7 @@ tbody tr.home-match-row {
 
 .roster-setup { display: grid; gap: 18px; }
 .panel-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
-.dropzone.is-dragging, .dropzone:focus-within { border-color: var(--accent); background: rgba(15, 108, 92, 0.12); }
+.dropzone.is-dragging, .dropzone:focus-within { border-color: var(--accent); background: rgba(56, 189, 248, 0.08); }
 .crew-list { display: grid; gap: 12px; }
 .crew-row { display: flex; align-items: center; gap: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
 .crew-choice { display: flex; flex: 1; min-width: 0; align-items: center; gap: 14px; cursor: pointer; padding: 6px 0; }
@@ -469,3 +471,45 @@ button:disabled { cursor: not-allowed; }
 
 .calendar-cell { min-width: 0; display: flex; border-right: 1px solid #1b232c; }
 .roster-calendar .calendar-cell .calendar-bar { width: calc(100% - 4px); }
+
+.hero-accent { color: var(--accent); }
+.hero h1 { letter-spacing: -0.045em; line-height: 1.1; }
+.crew-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; margin-top: 18px; }
+.crew-row { display: block; position: relative; padding: 22px 18px; border: 1px solid var(--crew-colour, var(--line)); border-radius: 14px; background: var(--panel); }
+.crew-profile { min-width: 0; }
+.crew-choice { align-items: flex-start; padding-top: 35px; }
+.crew-choice input { accent-color: var(--crew-colour, var(--accent)); }
+.remove-roster { position: absolute; top: 12px; right: 12px; min-height: 34px; font-size: 12px; padding: 6px 10px; color: #f87171; border-color: rgba(248,113,113,.25); background: rgba(248,113,113,.08); }
+.domicile-control { display: grid; gap: 8px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 14px; }
+.domicile-control select, .calendar-range-control select { width: 100%; min-height: 42px; padding: 8px 10px; border: 1px solid #2d3548; border-radius: 6px; color: var(--text); background: var(--surface2); font: inherit; }
+.domicile-help { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 9px 0 0; }
+.calendar-toolbar { flex-wrap: wrap; }
+.calendar-heading { flex: 1; min-width: 220px; }
+.calendar-heading .calendar-help { margin: 8px 0 0; }
+.calendar-range-control { display: grid; gap: 5px; font-size: 12px; color: var(--muted); min-width: 130px; }
+.calendar-week-number { font-size: 10px; color: var(--muted); align-self: center; }
+.secondary-button:hover:not(:disabled), .filter-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+#compare-button:hover:not(:disabled) { background: var(--accent-strong); }
+button:disabled { opacity: .4; }
+[hidden] { display: none !important; }
+@media (max-width: 560px) {
+  .calendar-heading { min-width: 100%; }
+  .calendar-range-control { flex: 1; }
+  .summary-row { grid-template-columns: 1fr; }
+}
+@media print {
+  :root { color-scheme: light; --text: #111; --muted: #444; --line: #ccc; --panel: #fff; }
+  body { background: #fff; color: #111; }
+  .hero, .roster-setup, .actions, .calendar-range-control, .calendar-nav { display: none !important; }
+  .shell { width: 100%; padding: 0; }
+  .roster-calendar { --calendar-bg: #fff; --calendar-line: #ccc; --calendar-muted: #444; color: #111; padding: 0; border: 0; box-shadow: none; }
+  .calendar-scroll { overflow: visible; }
+  .calendar-grid { min-width: 0; }
+  .calendar-week { break-inside: avoid; }
+  .calendar-day-head { background: #eee; }
+  .roster-calendar .calendar-bar { color: #111; font-size: 8px; }
+  .roster-calendar .calendar-trip { background: #e7edf5; }
+  .calendar-row-name { position: static; }
+  .calendar-crew-legend, .calendar-crew-legend strong { color: #111; }
+  @page { size: A4 landscape; margin: 10mm; }
+}

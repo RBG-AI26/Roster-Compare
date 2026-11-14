@@ -1,7 +1,7 @@
 // All dates are roster-local wall dates, matching the existing comparison engine.
 // Unknown duties never imply presence at home or in another port.
 const DAY_MS = 86400000;
-const CREW_COLOURS = ['#38bdf8', '#fb923c', '#a78bfa', '#f472b6', '#facc15'];
+export const CREW_COLOURS = ['#38bdf8', '#fb923c', '#a78bfa', '#f472b6', '#facc15'];
 export function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -36,8 +36,8 @@ function presenceWindows(roster) {
   const coverageEnd = addDays(roster.coverageEnd, 1);
   const windows = [
     ...roster.portWindows.map(window => ({ ...window, assumed: false, reserve: window.matchType === 'home_reserve' })),
-    ...roster.offDays.filter(() => roster.base).map(entry => ({
-      start: entry.date, end: addDays(entry.date, 1), port: roster.base,
+    ...roster.offDays.filter(() => roster.domicile || roster.base).map(entry => ({
+      start: entry.date, end: addDays(entry.date, 1), port: roster.domicile || roster.base,
       dutyCode: entry.dutyCode, assumed: true, reserve: false,
     })),
   ].map(window => ({ ...window,
@@ -61,7 +61,7 @@ export function sharedCalendarWindows(rosters, minOverlapMinutes = 60) {
   const threshold = Math.max(1, Number(minOverlapMinutes) || 60) * 60000;
   function intersect(index, port, start, end, participants) {
     if (index === rosters.length) {
-      const homeCount = rosters.filter(roster => roster.base === port).length;
+      const homeCount = rosters.filter(roster => (roster.domicile || roster.base) === port).length;
       matches.push({ port, start: new Date(start), end: new Date(end), participants,
         assumed: participants.some(window => window.assumed), reserve: participants.some(window => window.reserve),
         category: homeCount === rosters.length ? 'all-home' : homeCount ? 'some-home' : 'all-away',
@@ -98,20 +98,22 @@ function pilotDay(roster, date) {
     return { label: route.join(' → '), kind: 'trip', detail: legs.map(leg => `${leg.service || 'Flight'}: ${leg.origin} → ${leg.destination}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}`).join('\n\n') };
   }
   const offDay = roster.offDays.some(item => dateKey(item.date) === dateKey(date));
-  if (offDay) return { label: roster.base ? `${roster.base} · home*` : 'Day off · base unknown', kind: 'home', detail: `${entry.dutyCode} · day off.${roster.base ? `\n* Presence in ${roster.base} is assumed from the roster base; it is not confirmed by a flight.` : '\nNo home location has been inferred.'}` };
+  const home = roster.domicile || roster.base;
+  if (offDay) return { label: home ? `${home} · home*` : 'Day off · base unknown', kind: 'home', detail: `${entry.dutyCode} · day off.${home ? `\n* Assumed at home base / domicile ${home}; it is not confirmed by a flight. Roster base: ${roster.base || 'unknown'}.` : '\nNo home location has been inferred.'}` };
   const reserve = (roster.reserveDays || []).some(item => dateKey(item.date) === dateKey(date));
   if (reserve) return { label: `${roster.base || 'Base unknown'} · reserve`, kind: 'reserve', detail: `${entry.dutyCode} · reserve at base${entry.report && entry.end ? `\n${entry.report} – ${entry.end} roster local time` : '\nReserve times are unavailable.'}\nOn call; this does not imply free time.` };
   const stays = roster.portWindows.filter(window => window.start < end && window.end > start);
   if (stays.length) return { label: `${[...new Set(stays.map(window => window.port))].join(' / ')} · in port`, kind: 'trip', detail: stays.map(window => `${window.port} · ${window.dutyCode}\n${formatTime(window.start)} – ${formatTime(window.end)}`).join('\n\n') };
   return { label: 'Location unknown', kind: 'unknown', detail: `${entry.dutyCode}${entry.detail ? ` · ${entry.detail}` : ''}\nThe roster does not resolve this duty to a location.` };
 }
-export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60 } = {}) {
-  const first = new Date(month.getFullYear(), month.getMonth(), 1);
-  const last = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60, range = 'month' } = {}) {
+  const fullRoster = range === 'roster';
+  const first = fullRoster ? dayStart(new Date(Math.min(...rosters.map(roster => roster.coverageStart.getTime())))) : new Date(month.getFullYear(), month.getMonth(), 1);
+  const last = fullRoster ? dayStart(new Date(Math.max(...rosters.map(roster => roster.coverageEnd.getTime())))) : new Date(month.getFullYear(), month.getMonth() + 1, 0);
   const gridStart = addDays(first, -((first.getDay() + 6) % 7));
   const gridEnd = addDays(last, 6 - ((last.getDay() + 6) % 7));
   const windows = sharedCalendarWindows(rosters, minOverlapMinutes);
-  const crews = rosters.map((roster, index) => ({ name: crewName(roster), base: roster.base, colour: CREW_COLOURS[index] }));
+  const crews = rosters.map((roster, index) => ({ name: crewName(roster), base: roster.base, domicile: roster.domicile || roster.base, colour: roster.colour || CREW_COLOURS[index] }));
   const details = [], weeks = [];
   const detailId = detail => { details.push(detail); return details.length - 1; };
   for (let weekStart = gridStart; weekStart <= gridEnd; weekStart = addDays(weekStart, 7)) {
@@ -119,7 +121,7 @@ export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60 } =
     const weekEnd = addDays(weekStart, 7);
     const rows = rosters.map((roster, crewIndex) => dates.map((date, column) => {
       const day = pilotDay(roster, date);
-      return { ...day, column, span: 1, outside: date.getMonth() !== first.getMonth(),
+      return { ...day, column, span: 1, outside: date < first || date > last,
         detailId: detailId({ title: crews[crewIndex].name, subtitle: date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }), text: day.detail }),
       };
     }).reduce((bars, cell) => {
@@ -148,7 +150,8 @@ export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60 } =
     }
     weeks.push({ dates, rows, overlapLanes });
   }
-  return { month: first, title: first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }), crews, weeks, details };
+  const displayDate = date => date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return { month: new Date(month.getFullYear(), month.getMonth(), 1), first, last, range, title: fullRoster ? `${displayDate(first)} – ${displayDate(last)}` : first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }), dayCount: dayDistance(first, last) + 1, crews, weeks, details };
 }
 function escapeHtml(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
@@ -157,9 +160,9 @@ export function renderCalendarMarkup(model) {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const placement = bar => `grid-column: ${bar.column + 2} / span ${bar.span}`;
   const button = (bar, classes, style = '') => `<div class="calendar-cell" role="cell" aria-colindex="${bar.column + 2}" aria-colspan="${bar.span}" style="${placement(bar)};${style}"><button type="button" class="calendar-bar ${classes}" data-calendar-detail="${bar.detailId}" aria-label="${escapeHtml(`${model.details[bar.detailId].title} · ${model.details[bar.detailId].subtitle} · ${bar.label}`)}" title="${escapeHtml(bar.label)}">${escapeHtml(bar.label)}</button></div>`;
-  return `<div class="calendar-lane calendar-day-head" role="row"><span role="columnheader">Pilots / overlaps</span>${days.map(day => `<span role="columnheader">${day}</span>`).join('')}</div>` + model.weeks.map(week => `
+  return `<div class="calendar-lane calendar-day-head" role="row"><span role="columnheader">Pilots / overlaps</span>${days.map(day => `<span role="columnheader">${day}</span>`).join('')}</div>` + model.weeks.map((week, weekIndex) => `
     <div class="calendar-week" role="rowgroup">
-      <div class="calendar-lane calendar-dates" role="row"><span role="cell"></span>${week.dates.map(date => `<span role="cell" class="${date.getMonth() !== model.month.getMonth() ? 'is-outside' : ''}"><time datetime="${dateKey(date)}">${date.getMonth() !== model.month.getMonth() ? `${date.getDate()} ${date.toLocaleDateString('en-GB', { month: 'short' })}` : date.getDate()}</time></span>`).join('')}</div>
+      <div class="calendar-lane calendar-dates" role="row"><span role="cell" class="calendar-week-number">Week ${weekIndex + 1}</span>${week.dates.map(date => `<span role="cell" class="${date < model.first || date > model.last ? 'is-outside' : ''}"><time datetime="${dateKey(date)}">${model.range === 'roster' || date.getMonth() !== model.month.getMonth() ? `${date.getDate()} ${date.toLocaleDateString('en-GB', { month: 'short' })}` : date.getDate()}</time></span>`).join('')}</div>
       ${week.rows.map((bars, index) => `<div class="calendar-lane calendar-pilot-lane" role="row"><span class="calendar-row-name" role="rowheader" style="--crew-colour: ${model.crews[index].colour}" title="${escapeHtml(model.crews[index].name)}">${escapeHtml(model.crews[index].name)}</span>${bars.map(bar => button(bar, `calendar-${bar.kind}${bar.outside ? ' is-outside' : ''}`, `--crew-colour: ${model.crews[index].colour}`)).join('')}</div>`).join('')}
       <div class="calendar-together">${week.overlapLanes.length ? week.overlapLanes.map((lane, index) => `<div class="calendar-lane" role="row"><span class="calendar-row-name" role="rowheader">${index === 0 ? 'Together' : ''}</span>${lane.map(bar => button(bar, `calendar-overlap calendar-${bar.category}`)).join('')}</div>`).join('') : '<div class="calendar-lane" role="row"><span class="calendar-row-name" role="rowheader">Together</span><span class="calendar-no-overlap" role="cell">No shared time in port this week</span></div>'}</div>
     </div>`).join('');

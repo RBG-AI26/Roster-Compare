@@ -1,5 +1,5 @@
-import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261114-4";
-import { buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261114-4";
+import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261114-5";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261114-5";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const VALID_FILTERS = new Set(["all", "port_match", "shared_day_off"]);
@@ -33,6 +33,10 @@ const calendarDetailTitle = document.getElementById("calendar-detail-title");
 const calendarDetailSubtitle = document.getElementById("calendar-detail-subtitle");
 const calendarDetailText = document.getElementById("calendar-detail-text");
 const calendarDetailClose = document.getElementById("calendar-detail-close");
+const calendarRangeInput = document.getElementById("calendar-range");
+const calendarRangeSummary = document.getElementById("calendar-range-summary");
+const HOME_PORTS = { ADL: "Adelaide", MEL: "Melbourne", SYD: "Sydney", BNE: "Brisbane", PER: "Perth", DRW: "Darwin", HBA: "Hobart", CBR: "Canberra", OOL: "Gold Coast", CNS: "Cairns", AKL: "Auckland", WLG: "Wellington", CHC: "Christchurch", SIN: "Singapore", HKG: "Hong Kong", NRT: "Tokyo Narita", LAX: "Los Angeles", LHR: "London Heathrow" };
+let calendarRange = "roster";
 let calendarMonth = null;
 let calendarModel = null;
 
@@ -44,6 +48,11 @@ let activeFilter = "all";
 let deferredInstallPrompt = null;
 let pendingReloadForServiceWorker = false;
 
+calendarRangeInput.addEventListener("change", () => {
+  calendarRange = calendarRangeInput.value === "month" ? "month" : "roster";
+  if (currentPayload) renderCalendar();
+  persistState();
+});
 calendarPrevious.addEventListener("click", () => moveCalendarMonth(-1));
 calendarNext.addEventListener("click", () => moveCalendarMonth(1));
 calendarGrid.addEventListener("click", (event) => {
@@ -76,11 +85,15 @@ function renderCalendar() {
   if (!calendarMonth || calendarMonth < bounds.first || calendarMonth > bounds.last) {
     calendarMonth = initialCalendarMonth(calendarRosters);
   }
-  calendarModel = buildRosterCalendar(calendarRosters, calendarMonth, { minOverlapMinutes: Number(minOverlapInput.value || 60) });
+  calendarModel = buildRosterCalendar(calendarRosters, calendarMonth, { minOverlapMinutes: Number(minOverlapInput.value || 60), range: calendarRange });
   calendarTitle.textContent = calendarModel.title;
+  calendarRangeInput.value = calendarRange;
+  calendarRangeSummary.textContent = calendarRange === "roster" ? `${calendarModel.dayCount} days · ${calendarModel.weeks.length} calendar weeks · full roster` : "Month view";
+  calendarPrevious.hidden = calendarRange !== "month";
+  calendarNext.hidden = calendarRange !== "month";
   calendarPrevious.disabled = calendarMonth <= bounds.first;
   calendarNext.disabled = calendarMonth >= bounds.last;
-  calendarLegend.innerHTML = calendarModel.crews.map((crew) => `<span style="--crew-colour: ${crew.colour}"><strong>${escapeHtml(crew.name)}</strong><span>Base ${escapeHtml(crew.base || "unknown")}</span></span>`).join("");
+  calendarLegend.innerHTML = calendarModel.crews.map((crew) => `<span style="--crew-colour: ${crew.colour}"><strong>${escapeHtml(crew.name)}</strong><span>Home ${escapeHtml(crew.domicile || "unknown")} · base ${escapeHtml(crew.base || "unknown")}</span></span>`).join("");
   calendarGrid.innerHTML = renderCalendarMarkup(calendarModel);
   calendarDetails.hidden = true;
 }
@@ -148,6 +161,20 @@ for (const eventName of ["dragleave", "drop"]) {
 dropzone.addEventListener("drop", (event) => addRosterFiles(Array.from(event.dataTransfer.files)));
 
 crewList.addEventListener("change", (event) => {
+  if (isProcessing) return;
+  const domicileInput = event.target.closest("[data-domicile-index]");
+  if (domicileInput) {
+    const roster = loadedRosters[Number(domicileInput.dataset.domicileIndex)];
+    const domicile = String(domicileInput.value).trim().toUpperCase();
+    if (!roster || !/^[A-Z]{3}$/.test(domicile)) return;
+    roster.domicile = domicile;
+    roster.parsed.domicile = domicile;
+    comparisonCache.clear();
+    prepareComparisons();
+    renderCrewList();
+    updateSelection();
+    return;
+  }
   const input = event.target.closest("[data-roster-index]");
   if (!input || isProcessing) return;
   loadedRosters[Number(input.dataset.rosterIndex)].selected = input.checked;
@@ -199,6 +226,8 @@ clearStorageButton.addEventListener("click", () => {
   comparisonCache.clear();
   activeFilter = "all";
   calendarMonth = null;
+  calendarRange = "roster";
+  calendarRangeInput.value = "roster";
   form.reset();
   minOverlapInput.value = "60";
   hideResults();
@@ -231,7 +260,7 @@ async function addRosterFiles(files) {
     if (!/\.txt$/i.test(file.name) && file.type !== "text/plain") {
       throw new Error("Choose an ARMS or webCIS .txt roster.");
     }
-    const text = await file.text();
+    const text = await readRosterFile(file);
     return { fileName: file.name, text, parsed: parseRosterText(file.name, text), selected: true };
   }));
   outcomes.forEach((outcome, index) => {
@@ -240,7 +269,11 @@ async function addRosterFiles(files) {
     } else if (loadedRosters.some((roster) => roster.text === outcome.value.text)) {
       messages.push(`${files[index].name}: this roster is already loaded.`);
     } else {
-      loadedRosters.push(outcome.value);
+      const roster = outcome.value;
+      roster.domicile = roster.parsed.base;
+      roster.parsed.domicile = roster.domicile;
+      roster.parsed.colour = CREW_COLOURS.find(colour => !loadedRosters.some(item => item.parsed.colour === colour));
+      loadedRosters.push(roster);
       added += 1;
     }
   });
@@ -256,6 +289,16 @@ async function addRosterFiles(files) {
   rerunComparison();
   persistState();
   uploadStatus.textContent = [`${added} roster${added === 1 ? "" : "s"} added.`, ...messages].join(" ");
+}
+
+async function readRosterFile(file) {
+  if (typeof file.text === "function") return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not read this roster file."));
+    reader.readAsText(file);
+  });
 }
 
 function selectedRosters() {
@@ -296,8 +339,8 @@ function renderCrewList() {
     const crew = roster.parsed;
     const name = crew.crewName !== "Unknown" ? crew.crewName : roster.fileName;
     return `
-      <div class="crew-row">
-        <label class="crew-choice">
+      <div class="crew-row" style="--crew-colour: ${crew.colour}">
+        <div class="crew-profile"><label class="crew-choice">
           <input type="checkbox" data-roster-index="${index}" ${roster.selected ? "checked" : ""} ${isProcessing ? "disabled" : ""} />
           <span class="crew-details">
             <strong>${escapeHtml(name)}</strong>
@@ -306,9 +349,18 @@ function renderCrewList() {
             <span class="crew-filename">${escapeHtml(roster.fileName)}</span>
           </span>
         </label>
+        <label class="domicile-control" for="domicile-${index}">Home city / domicile
+          <select id="domicile-${index}" data-domicile-index="${index}" aria-describedby="domicile-help-${index}" ${isProcessing ? "disabled" : ""}>${domicileOptions(crew)}</select>
+        </label>
+        <p id="domicile-help-${index}" class="domicile-help">Days off: ${escapeHtml(crew.domicile || crew.base || "unknown")} (assumed). Roster base: ${escapeHtml(crew.base || "unknown")}.</p></div>
         <button type="button" class="secondary-button remove-roster" data-remove-index="${index}" aria-label="Remove ${escapeHtml(name)}" ${isProcessing ? "disabled" : ""}>Remove</button>
       </div>`;
   }).join("") : '<p class="empty-state">Your crew will appear here after you add rosters.</p>';
+}
+
+function domicileOptions(crew) {
+  const ports = new Set([...Object.keys(HOME_PORTS), crew.base, crew.domicile, ...loadedRosters.flatMap(item => item.parsed.portWindows.map(window => window.port))].filter(Boolean));
+  return [...ports].sort().map(port => `<option value="${escapeHtml(port)}" ${port === (crew.domicile || crew.base) ? "selected" : ""}>${escapeHtml(port)}${HOME_PORTS[port] ? ` — ${escapeHtml(HOME_PORTS[port])}` : ""}</option>`).join("");
 }
 
 function prepareComparisons() {
@@ -424,6 +476,7 @@ function renderSummaryCard(index, summary) {
     <ul class="summary-meta">
       <li>Staff number: ${escapeHtml(summary.staff_number || "Unknown")}</li>
       <li>Base: ${escapeHtml(summary.base || "Unknown")}</li>
+      <li>Domicile: ${escapeHtml(summary.domicile || summary.base || "Unknown")}</li>
       <li>Bid period: ${escapeHtml(summary.bid_period || "Unknown")}</li>
       <li>Dates: ${escapeHtml(summary.coverage_start || "Unknown")} – ${escapeHtml(summary.coverage_end || "Unknown")}</li>
       <li>Uncertain duties: ${escapeHtml(String(summary.unresolved_duties.length))}</li>
@@ -474,9 +527,10 @@ function persistState() {
       JSON.stringify({
         activeFilter,
         calendarMonth: calendarMonth ? dateKey(calendarMonth) : null,
+        calendarRange,
         minOverlapMinutes: Number(minOverlapInput.value || 60),
         currentInputs: {
-          rosters: loadedRosters.map(({ fileName, text, selected }) => ({ fileName, text, selected })),
+          rosters: loadedRosters.map(({ fileName, text, selected, domicile, parsed }) => ({ fileName, text, selected, domicile, colour: parsed.colour })),
         },
       })
     );
@@ -523,9 +577,16 @@ function restorePersistedState() {
     calendarMonth = new Date(year, month - 1, 1);
   }
 
+  calendarRange = savedState.calendarRange === "month" ? "month" : "roster";
+  calendarRangeInput.value = calendarRange;
+
   for (const roster of savedState.currentInputs.rosters) {
     try {
-      loadedRosters.push({ ...roster, selected: roster.selected !== false, parsed: parseRosterText(roster.fileName, roster.text) });
+      const parsed = parseRosterText(roster.fileName, roster.text);
+      const domicile = /^[A-Z]{3}$/.test(roster.domicile || "") ? roster.domicile : parsed.base;
+      parsed.domicile = domicile;
+      parsed.colour = CREW_COLOURS.includes(roster.colour) ? roster.colour : CREW_COLOURS.find(colour => !loadedRosters.some(item => item.parsed.colour === colour));
+      loadedRosters.push({ ...roster, domicile, selected: roster.selected !== false, parsed });
     } catch {
       uploadStatus.textContent = "Some saved rosters could not be read. Add those files again.";
     }

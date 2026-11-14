@@ -42,3 +42,14 @@ test('rejects invalid group sizes and unparseable input', () => {
   for (const count of [0, 1, 6]) assert.throws(() => compareRosterGroupTexts(Array.from({ length: count }, (_, i) => roster(i))), /between 2 and 5/);
   assert.throws(() => parseRosterText('bad.txt', 'not a roster'), /No calendar entries/);
 });
+test('a day off uses domicile when matching a visiting pilot, without moving base', async () => {
+  const {compareRosterGroup}=await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  const a=parseRosterText(roster(0).fileName,roster(0).text);
+  const b=parseRosterText(roster(1).fileName,roster(1).text);
+  a.base='MEL';a.domicile='ADL';
+  a.calendar[0].dutyCode='A';a.offDays.push(a.calendar[0]);a.portWindows=[];
+  b.portWindows.forEach(window=>window.port='ADL');
+  const matches=compareRosterGroup([a,b]).matches;
+  assert.ok(matches.some(match=>match.match_key==='port_match'&&match.port==='ADL'));
+  assert.equal(a.base,'MEL');
+});
