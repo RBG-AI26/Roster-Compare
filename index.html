@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,7 +7,7 @@
       name="description"
       content="Load up to five crew rosters and choose who to compare, locally on your device."
     />
-    <meta name="theme-color" content="#080b10" />
+    <meta id="theme-colour" name="theme-color" content="#080b10" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Roster Compare" />
@@ -16,13 +16,24 @@
     <link rel="manifest" href="./manifest.json" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=20261114-5" />
+    <script>
+      try {
+        if (localStorage.getItem("roster-compare-theme") === "light") {
+          document.documentElement.dataset.theme = "light";
+          document.getElementById("theme-colour").setAttribute("content", "#f3f6fa");
+        }
+      } catch { /* Use the default theme if storage is unavailable. */ }
+    </script>
+    <link rel="stylesheet" href="./styles.css?v=20261115-1" />
   </head>
   <body>
     <main class="shell">
       <section class="hero">
-        <p class="eyebrow">Roster Compare</p>
-        <h1>Roster <span class="hero-accent">Overlap</span></h1>
+        <div><p class="eyebrow">Roster Compare</p>
+        <h1>Roster <span class="hero-accent">Overlap</span></h1></div>
+        <button id="theme-toggle" class="theme-toggle" type="button" role="switch" aria-checked="true" aria-label="Dark mode">
+          <span id="theme-label">Dark mode</span><span class="theme-track" aria-hidden="true"><span class="theme-thumb"></span></span>
+        </button>
       </section>
 
       <form id="compare-form" class="roster-setup">
@@ -56,7 +67,6 @@
           <input id="min-overlap-minutes" name="min_overlap_minutes" form="compare-form" type="number" min="1" max="1440" step="1" value="60" />
         </label>
         <div class="action-buttons">
-          <button id="compare-button" disabled type="submit" form="compare-form">Compare rosters</button>
           <button id="install-button" type="button" class="secondary-button" hidden>Install app</button>
           <button id="clear-storage-button" type="button" class="secondary-button">Clear saved data</button>
         </div>
@@ -75,7 +85,7 @@
             <button id="calendar-next" class="calendar-nav" type="button" aria-label="Next month">→</button>
           </div>
           <div id="calendar-crew-legend" class="calendar-crew-legend"></div>
-          <p class="calendar-help">Pilot rows show trips and home days. Highlighted bars show time in the same port for everyone selected; click for exact times. Dates and times follow the roster’s local dates. * Assumed presence at the selected domicile on a day off. Reserve means on call. Shared days off at different domiciles appear in the table below.</p>
+          <p class="calendar-help">Pilot rows show trips, ground duties and home days. Highlighted bars show time in the same port for everyone selected; click for exact times. Dates and times follow the roster’s local dates. * Assumed presence at the selected domicile on a day off. Training overlaps are labelled on duty; reserve means on call. Shared days off at different domiciles appear in the table below.</p>
           <div class="calendar-legend" aria-label="Shared-time colours">
             <span class="calendar-all-home">Everyone’s home city</span>
             <span class="calendar-some-home">Someone’s home city</span>
@@ -117,6 +127,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js?v=20261114-5"></script>
+    <script type="module" src="./app.js?v=20261115-1"></script>
   </body>
 </html>

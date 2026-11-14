@@ -8,6 +8,7 @@ export function dateKey(date) {
 const dayStart = date => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const addDays = (date, n) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + n);
 const dayDistance = (a, b) => Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate()) - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / DAY_MS);
+const homePort = roster => roster.requiresDomicile ? null : roster.domicile || roster.base;
 const crewName = roster => roster.displayName || roster.crewName || roster.fileName;
 const formatTime = date => date.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
 export function calendarBounds(rosters) {
@@ -35,20 +36,19 @@ export function initialCalendarMonth(rosters) {
 function presenceWindows(roster) {
   const coverageEnd = addDays(roster.coverageEnd, 1);
   const windows = [
-    ...roster.portWindows.map(window => ({ ...window, assumed: false, reserve: window.matchType === 'home_reserve' })),
-    ...roster.offDays.filter(() => roster.domicile || roster.base).map(entry => ({
-      start: entry.date, end: addDays(entry.date, 1), port: roster.domicile || roster.base,
-      dutyCode: entry.dutyCode, assumed: true, reserve: false,
-    })),
+    ...roster.portWindows.map(window => ({ ...window, assumed: false, reserve: window.matchType === 'home_reserve', onDuty: Boolean(window.onDuty) })),
+    ...roster.offDays.filter(() => homePort(roster)).flatMap(entry => (entry.homeWindows || [{ start: entry.date, end: addDays(entry.date, 1) }]).map(window => ({
+      ...window, port: homePort(roster), dutyCode: entry.dutyCode, assumed: true, reserve: false, onDuty: false,
+    }))),
   ].map(window => ({ ...window,
     start: new Date(Math.max(window.start.getTime(), roster.coverageStart.getTime())),
     end: new Date(Math.min(window.end.getTime(), coverageEnd.getTime())),
   })).filter(window => window.port && window.port !== '?' && window.end > window.start);
-  windows.sort((a, b) => a.port.localeCompare(b.port) || Number(a.assumed) - Number(b.assumed) || Number(a.reserve) - Number(b.reserve) || a.start - b.start);
+  windows.sort((a, b) => a.port.localeCompare(b.port) || Number(a.assumed) - Number(b.assumed) || Number(a.reserve) - Number(b.reserve) || Number(a.onDuty) - Number(b.onDuty) || a.start - b.start);
   const merged = [];
   for (const window of windows) {
     const previous = merged[merged.length - 1];
-    if (previous && previous.port === window.port && previous.assumed === window.assumed && previous.reserve === window.reserve && window.start <= previous.end) {
+    if (previous && previous.port === window.port && previous.assumed === window.assumed && previous.reserve === window.reserve && previous.onDuty === window.onDuty && window.start <= previous.end) {
       previous.end = new Date(Math.max(previous.end.getTime(), window.end.getTime()));
       previous.dutyCode = [...new Set([...previous.dutyCode.split(' / '), window.dutyCode])].join(' / ');
     } else merged.push({ ...window });
@@ -61,9 +61,9 @@ export function sharedCalendarWindows(rosters, minOverlapMinutes = 60) {
   const threshold = Math.max(1, Number(minOverlapMinutes) || 60) * 60000;
   function intersect(index, port, start, end, participants) {
     if (index === rosters.length) {
-      const homeCount = rosters.filter(roster => (roster.domicile || roster.base) === port).length;
+      const homeCount = rosters.filter(roster => (homePort(roster)) === port).length;
       matches.push({ port, start: new Date(start), end: new Date(end), participants,
-        assumed: participants.some(window => window.assumed), reserve: participants.some(window => window.reserve),
+        assumed: participants.some(window => window.assumed), reserve: participants.some(window => window.reserve), onDuty: participants.some(window => window.onDuty),
         category: homeCount === rosters.length ? 'all-home' : homeCount ? 'some-home' : 'all-away',
       });
       return;
@@ -78,7 +78,7 @@ export function sharedCalendarWindows(rosters, minOverlapMinutes = 60) {
   for (const window of windows[0] || []) intersect(1, window.port, window.start.getTime(), window.end.getTime(), [window]);
   const seen = new Set();
   return matches.sort((a, b) => a.start - b.start || a.port.localeCompare(b.port)).filter(match => {
-    const key = `${match.port}:${match.start.getTime()}:${match.end.getTime()}:${match.assumed}:${match.reserve}`;
+    const key = `${match.port}:${match.start.getTime()}:${match.end.getTime()}:${match.assumed}:${match.reserve}:${match.onDuty}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -86,20 +86,38 @@ export function sharedCalendarWindows(rosters, minOverlapMinutes = 60) {
 }
 function pilotDay(roster, date) {
   const start = dayStart(date), end = addDays(date, 1);
-  const entry = roster.calendar.find(item => dateKey(item.date) === dateKey(date));
+  const entries = roster.calendar.filter(item => dateKey(item.date) === dateKey(date));
+  const entry = entries[0];
   if (!entry) return { label: 'No roster', kind: 'unavailable', detail: 'No roster entry is available for this date.' };
-  const legs = (roster.trips || []).flatMap(trip => trip.legs).filter(leg => leg.departureDateTime < end && leg.arrivalDateTime >= start);
+  const ground = roster.calendar.filter(item => item.dutyInfo && !item.dutyInfo.assumeHome && (entries.includes(item) || (item.dutyInfo.start < end && item.dutyInfo.end > start)));
+  const offEntry = roster.offDays.find(item => dateKey(item.date) === dateKey(date));
+  const homeDetail = offEntry?.homeWindows ? `\n* Assumed at domicile ${homePort(roster) || 'unknown'} outside known duty times:\n${offEntry.homeWindows.map(window => `${formatTime(window.start)} – ${formatTime(window.end)}`).join('\n')}` : '';
+  const groundDetail = item => {
+    const info = item.dutyInfo;
+    return [info.label, item.detail, info.port ? `${info.port} · ${info.locationSource}` : null,
+      info.start ? `${formatTime(info.start)} – ${formatTime(info.end)} · ${info.timingSource}` : null,
+      ...(info.issues || []), info.kind === 'reserve' ? 'On call; this does not imply free time.' : info.kind !== 'leave' ? 'On duty; this does not imply free time.' : null].filter(Boolean).join('\n');
+  };
+  const allLegs = (roster.trips || []).flatMap(trip => trip.legs).filter(leg => leg.departureDateTime < end && leg.arrivalDateTime > start);
+  const legs = allLegs.filter(leg => leg.origin !== leg.destination);
   if (legs.length) {
     const route = [legs[0].origin];
     for (const leg of legs) {
       if (route[route.length - 1] !== leg.origin) route.push(leg.origin);
       route.push(leg.destination);
     }
-    return { label: route.join(' → '), kind: 'trip', detail: legs.map(leg => `${leg.service || 'Flight'}: ${leg.origin} → ${leg.destination}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}`).join('\n\n') };
+    return { label: route.join(' → ') + (ground.length ? ` · ${ground.map(item => item.dutyInfo.label).join(' / ')}` : ''), kind: 'trip', detail: legs.map(leg => `${leg.service || 'Flight'}: ${leg.origin} → ${leg.destination}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}`).concat(ground.map(groundDetail)).join('\n\n') };
   }
+  if (ground.length) return {
+    label: ground.map(item => `${item.dutyInfo.port || (item.dutyInfo.kind === 'leave' ? '' : 'Port not supplied')}${item.dutyInfo.port || item.dutyInfo.kind !== 'leave' ? ' · ' : ''}${item.dutyInfo.label}`).join(' / ') + (offEntry ? ` / ${homePort(roster) || 'Home'} · home*` : ''),
+    kind: ground.every(item => item.dutyInfo.kind === 'reserve') ? 'reserve' : ground.every(item => item.dutyInfo.kind === 'leave') ? 'leave' : 'ground',
+    detail: ground.map(groundDetail).join('\n\n') + homeDetail,
+  };
+  if (allLegs.length) return { label: [...new Set(allLegs.map(leg => `${leg.origin} · ${leg.service || 'ground duty'}`))].join(' / '), kind: 'ground',
+    detail: allLegs.map(leg => `${leg.service || 'Ground duty'} · ${leg.origin}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}\nOn duty; this does not imply free time.`).join('\n\n') };
   const offDay = roster.offDays.some(item => dateKey(item.date) === dateKey(date));
-  const home = roster.domicile || roster.base;
-  if (offDay) return { label: home ? `${home} · home*` : 'Day off · base unknown', kind: 'home', detail: `${entry.dutyCode} · day off.${home ? `\n* Assumed at home base / domicile ${home}; it is not confirmed by a flight. Roster base: ${roster.base || 'unknown'}.` : '\nNo home location has been inferred.'}` };
+  const home = homePort(roster);
+  if (offDay) return { label: home ? `${home} · home*` : roster.requiresDomicile ? 'Day off · choose domicile' : 'Day off · base unknown', kind: 'home', detail: `${entry.dutyCode} · day off.${home ? `\n* Assumed at home base / domicile ${home}; it is not confirmed by a flight. Roster base: ${roster.base || 'unknown'}.${homeDetail}` : '\nNo home location has been inferred.'}` };
   const reserve = (roster.reserveDays || []).some(item => dateKey(item.date) === dateKey(date));
   if (reserve) return { label: `${roster.base || 'Base unknown'} · reserve`, kind: 'reserve', detail: `${entry.dutyCode} · reserve at base${entry.report && entry.end ? `\n${entry.report} – ${entry.end} roster local time` : '\nReserve times are unavailable.'}\nOn call; this does not imply free time.` };
   const stays = roster.portWindows.filter(window => window.start < end && window.end > start);
@@ -113,7 +131,7 @@ export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60, ra
   const gridStart = addDays(first, -((first.getDay() + 6) % 7));
   const gridEnd = addDays(last, 6 - ((last.getDay() + 6) % 7));
   const windows = sharedCalendarWindows(rosters, minOverlapMinutes);
-  const crews = rosters.map((roster, index) => ({ name: crewName(roster), base: roster.base, domicile: roster.domicile || roster.base, colour: roster.colour || CREW_COLOURS[index] }));
+  const crews = rosters.map((roster, index) => ({ name: crewName(roster), base: roster.base, domicile: homePort(roster), colour: roster.colour || CREW_COLOURS[index] }));
   const details = [], weeks = [];
   const detailId = detail => { details.push(detail); return details.length - 1; };
   for (let weekStart = gridStart; weekStart <= gridEnd; weekStart = addDays(weekStart, 7)) {
@@ -136,9 +154,9 @@ export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60, ra
       const column = dayDistance(weekStart, dayStart(start));
       const endColumn = dayDistance(weekStart, dayStart(new Date(end.getTime() - 1)));
       return { ...window, column, span: endColumn - column + 1,
-        label: `${window.port} · ${crews.map(crew => crew.name).join(' + ')}${window.assumed ? ' *' : ''}${window.reserve ? ' · on call' : ''}`,
+        label: `${window.port} · ${crews.map(crew => crew.name).join(' + ')}${window.assumed ? ' *' : ''}${window.reserve ? ' · on call' : ''}${window.onDuty ? ' · on duty' : ''}`,
         detailId: detailId({ title: `${window.port} · shared time`, subtitle: `${formatTime(window.start)} – ${formatTime(window.end)} · roster local time`,
-          text: window.participants.map((participant, index) => `${crews[index].name}: ${participant.dutyCode}\n${formatTime(participant.start)} – ${formatTime(participant.end)}${participant.assumed ? '\n* Assumed at home base on a day off.' : ''}${participant.reserve ? '\nReserve: on call, not confirmed free time.' : ''}`).join('\n\n'),
+          text: window.participants.map((participant, index) => `${crews[index].name}: ${participant.dutyCode}\n${formatTime(participant.start)} – ${formatTime(participant.end)}${participant.assumed ? '\n* Assumed at home base on a day off.' : ''}${participant.reserve ? '\nReserve: on call, not confirmed free time.' : ''}${participant.onDuty ? '\nGround / training duty: on duty, not confirmed free time.' : ''}`).join('\n\n'),
         }),
       };
     });

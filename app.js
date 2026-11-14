@@ -1,11 +1,14 @@
-import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261114-5";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261114-5";
+import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261115-1";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261115-1";
 
 const STORAGE_KEY = "roster-compare-state-v2";
+const THEME_STORAGE_KEY = "roster-compare-theme";
+const themeToggle = document.getElementById("theme-toggle");
+const themeLabel = document.getElementById("theme-label");
+const themeColour = document.getElementById("theme-colour");
 const VALID_FILTERS = new Set(["all", "port_match", "shared_day_off"]);
 
 const form = document.getElementById("compare-form");
-const compareButton = document.getElementById("compare-button");
 const installButton = document.getElementById("install-button");
 const clearStorageButton = document.getElementById("clear-storage-button");
 const minOverlapInput = document.getElementById("min-overlap-minutes");
@@ -35,7 +38,7 @@ const calendarDetailText = document.getElementById("calendar-detail-text");
 const calendarDetailClose = document.getElementById("calendar-detail-close");
 const calendarRangeInput = document.getElementById("calendar-range");
 const calendarRangeSummary = document.getElementById("calendar-range-summary");
-const HOME_PORTS = { ADL: "Adelaide", MEL: "Melbourne", SYD: "Sydney", BNE: "Brisbane", PER: "Perth", DRW: "Darwin", HBA: "Hobart", CBR: "Canberra", OOL: "Gold Coast", CNS: "Cairns", AKL: "Auckland", WLG: "Wellington", CHC: "Christchurch", SIN: "Singapore", HKG: "Hong Kong", NRT: "Tokyo Narita", LAX: "Los Angeles", LHR: "London Heathrow" };
+const HOME_PORTS = { ADL: "Adelaide", BNE: "Brisbane", CBR: "Canberra", DRW: "Darwin", HBA: "Hobart", MEL: "Melbourne", PER: "Perth", SYD: "Sydney" };
 let calendarRange = "roster";
 let calendarMonth = null;
 let calendarModel = null;
@@ -166,9 +169,10 @@ crewList.addEventListener("change", (event) => {
   if (domicileInput) {
     const roster = loadedRosters[Number(domicileInput.dataset.domicileIndex)];
     const domicile = String(domicileInput.value).trim().toUpperCase();
-    if (!roster || !/^[A-Z]{3}$/.test(domicile)) return;
+    if (!roster || !Object.hasOwn(HOME_PORTS, domicile)) return;
     roster.domicile = domicile;
     roster.parsed.domicile = domicile;
+    roster.parsed.requiresDomicile = false;
     comparisonCache.clear();
     prepareComparisons();
     renderCrewList();
@@ -192,7 +196,7 @@ crewList.addEventListener("click", (event) => {
 
 minOverlapInput.addEventListener("change", () => {
   persistState();
-  if (currentPayload && minOverlapInput.checkValidity()) rerunComparison();
+  if (!isProcessing) rerunComparison();
 });
 
 filterBar.addEventListener("click", (event) => {
@@ -270,8 +274,9 @@ async function addRosterFiles(files) {
       messages.push(`${files[index].name}: this roster is already loaded.`);
     } else {
       const roster = outcome.value;
-      roster.domicile = roster.parsed.base;
+      roster.domicile = capitalDomicile(null, roster.parsed.base);
       roster.parsed.domicile = roster.domicile;
+      roster.parsed.requiresDomicile = !roster.domicile;
       roster.parsed.colour = CREW_COLOURS.find(colour => !loadedRosters.some(item => item.parsed.colour === colour));
       loadedRosters.push(roster);
       added += 1;
@@ -327,7 +332,6 @@ function updateRosterControls() {
   rosterCount.textContent = `${loadedRosters.length} / ${MAX_ROSTERS} loaded`;
   const count = selectedRosters().length;
   selectionCount.textContent = `${count} selected`;
-  compareButton.disabled = isProcessing || count < 2;
   if (isProcessing) statusEl.textContent = "Processing roster files…";
   else if (count < 2) statusEl.textContent = loadedRosters.length < 2 ? "Add at least two rosters to begin." : "Select at least two crew to compare.";
   else if (!currentPayload) statusEl.textContent = `${count} crew selected. Updating comparison…`;
@@ -352,15 +356,19 @@ function renderCrewList() {
         <label class="domicile-control" for="domicile-${index}">Home city / domicile
           <select id="domicile-${index}" data-domicile-index="${index}" aria-describedby="domicile-help-${index}" ${isProcessing ? "disabled" : ""}>${domicileOptions(crew)}</select>
         </label>
-        <p id="domicile-help-${index}" class="domicile-help">Days off: ${escapeHtml(crew.domicile || crew.base || "unknown")} (assumed). Roster base: ${escapeHtml(crew.base || "unknown")}.</p></div>
+        <p id="domicile-help-${index}" class="domicile-help">Days off: ${escapeHtml(crew.domicile ? `${crew.domicile} (assumed)` : "choose a capital city; no home presence assumed")}. Roster base: ${escapeHtml(crew.base || "unknown")}.</p></div>
         <button type="button" class="secondary-button remove-roster" data-remove-index="${index}" aria-label="Remove ${escapeHtml(name)}" ${isProcessing ? "disabled" : ""}>Remove</button>
       </div>`;
   }).join("") : '<p class="empty-state">Your crew will appear here after you add rosters.</p>';
 }
 
+function capitalDomicile(value, base) {
+  return Object.hasOwn(HOME_PORTS, value) ? value : Object.hasOwn(HOME_PORTS, base) ? base : null;
+}
+
 function domicileOptions(crew) {
-  const ports = new Set([...Object.keys(HOME_PORTS), crew.base, crew.domicile, ...loadedRosters.flatMap(item => item.parsed.portWindows.map(window => window.port))].filter(Boolean));
-  return [...ports].sort().map(port => `<option value="${escapeHtml(port)}" ${port === (crew.domicile || crew.base) ? "selected" : ""}>${escapeHtml(port)}${HOME_PORTS[port] ? ` — ${escapeHtml(HOME_PORTS[port])}` : ""}</option>`).join("");
+  const placeholder = crew.domicile ? "" : '<option value="" selected disabled>Choose a capital city</option>';
+  return placeholder + Object.entries(HOME_PORTS).map(([port, city]) => `<option value="${port}" ${port === crew.domicile ? "selected" : ""}>${port} — ${city}</option>`).join("");
 }
 
 function prepareComparisons() {
@@ -460,7 +468,7 @@ function renderSummaryCard(index, summary) {
             (item) => `
               <li>
                 <span>${escapeHtml(item.date)}</span>
-                <span class="duty-code">${escapeHtml(item.duty_code)}</span>
+                <span><span class="duty-code">${escapeHtml(item.label || item.duty_code)}</span><small class="uncertain-reason">${escapeHtml(item.reason || "Duty details are incomplete.")}</small></span>
               </li>
             `
           )
@@ -583,8 +591,9 @@ function restorePersistedState() {
   for (const roster of savedState.currentInputs.rosters) {
     try {
       const parsed = parseRosterText(roster.fileName, roster.text);
-      const domicile = /^[A-Z]{3}$/.test(roster.domicile || "") ? roster.domicile : parsed.base;
+      const domicile = capitalDomicile(roster.domicile, parsed.base);
       parsed.domicile = domicile;
+      parsed.requiresDomicile = !domicile;
       parsed.colour = CREW_COLOURS.includes(roster.colour) ? roster.colour : CREW_COLOURS.find(colour => !loadedRosters.some(item => item.parsed.colour === colour));
       loadedRosters.push({ ...roster, domicile, selected: roster.selected !== false, parsed });
     } catch {
@@ -616,6 +625,22 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
+
+function applyTheme(theme, save = false) {
+  const dark = theme !== "light";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  themeToggle.setAttribute("aria-checked", String(dark));
+  themeLabel.textContent = dark ? "Dark mode" : "Light mode";
+  themeColour.setAttribute("content", dark ? "#080b10" : "#f3f6fa");
+  if (save) {
+    try { localStorage.setItem(THEME_STORAGE_KEY, dark ? "dark" : "light"); } catch { /* Appearance still works without storage. */ }
+  }
+}
+
+let savedTheme = "dark";
+try { if (localStorage.getItem(THEME_STORAGE_KEY) === "light") savedTheme = "light"; } catch { /* Keep the default appearance. */ }
+applyTheme(savedTheme);
+themeToggle.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true));
 
 renderCrewList();
 updateActiveFilterButton();

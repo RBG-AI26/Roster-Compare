@@ -1,6 +1,11 @@
-const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "AL", "GL", "LSL"]);
-const SHORT_HAUL_OFF_DUTY_CODES = new Set(["D/O", "LA", "A/V"]);
-const SHORT_HAUL_RESERVE_DUTY_REGEX = /^R[A-Z0-9]*$/i;
+// Duty meanings are aligned with Roster Export iCal/public/shared/roster-parser.mjs
+// and roster-analysis.mjs. Recognition never supplies missing clock times.
+const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "RX", "AL", "GL", "HL", "LSL"]);
+const LEAVE_LABELS = { AL: "Annual leave", GL: "Golden leave", HL: "High priority leave", LSL: "Long service leave", LA: "Leave", SL: "Sick leave", UL: "Upline sick leave" };
+const EMERGENCY_PORTS = { SY: "SYD", ML: "MEL", BN: "BNE", PH: "PER" };
+const KNOWN_PORTS = new Set(["ADL", "MEL", "SYD", "BNE", "PER", "DRW", "HBA", "CBR", "OOL", "CNS", "AKL", "WLG", "CHC", "SIN", "HKG", "NRT", "HND", "LAX", "LHR", "DFW", "JNB", "SCL", "DPS", "BKK", "NAN", "HTI", "MCY", "TSV", "NTL"]);
+const SHORT_HAUL_OFF_DUTY_CODES = new Set(["D/O", "LA", "A/V", ...LONG_HAUL_OFF_DUTY_CODES]);
+const SHORT_HAUL_RESERVE_DUTY_REGEX = /^(?:SR|R(?:[0-9]+|SV|ES(?:ERVE)?)?)$/i;
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_CODES = new Map([
   ["MO", 1],
@@ -83,7 +88,7 @@ function buildTwoRosterMatches(rosterA, rosterB, portMatchWindowMs) {
   return dedupeMatches(
     [
       ...compareDaysOff(rosterA, rosterB),
-      ...compareReserveDays(rosterA, rosterB),
+      ...compareReserveDays(rosterA, rosterB, portMatchWindowMs),
       ...compareGroupPortMatches([rosterA, rosterB], portMatchWindowMs).map(genericMatchToLegacyMatch),
     ].map(legacyMatchToGenericMatch)
   );
@@ -128,23 +133,32 @@ function genericMatchToLegacyMatch(match) {
   };
 }
 
+function offDayWindows(entry) {
+  return entry.homeWindows || [{ start: entry.date, end: addDays(entry.date, 1) }];
+}
+
 function compareGroupDaysOff(rosters) {
   const others = rosters.slice(1).map(roster => new Map(roster.offDays.map(entry => [formatSortableLocalDate(entry.date), entry])));
   return rosters[0].offDays.flatMap(first => {
     const entries = [first, ...others.map(byDate => byDate.get(formatSortableLocalDate(first.date)))];
     if (entries.some(entry => !entry)) return [];
-    return [{ date: formatDisplayLocalDate(first.date), sort_date: formatSortableLocalDate(first.date),
-      port: formatCombinedPort(rosters.map(homePort)), match_type: "Shared day off", match_key: "shared_day_off", overlap_window: "All day",
-      participants: entries.map((entry, index) => ({ label: `${entry.dutyCode} (${homePort(rosters[index]) || "home unknown"})`, window: "All day" })), visual_group: "home_match" }];
+    let common = offDayWindows(first);
+    for (const entry of entries.slice(1)) common = common.flatMap(a => offDayWindows(entry).map(b => ({ start: new Date(Math.max(a.start, b.start)), end: new Date(Math.min(a.end, b.end)) })).filter(window => window.end > window.start));
+    return common.map(window => {
+      const allDay = window.start.getTime() === first.date.getTime() && window.end.getTime() === addDays(first.date, 1).getTime();
+      return { date: formatDisplayLocalDate(first.date), sort_date: formatSortableLocalDate(first.date),
+        port: formatCombinedPort(rosters.map(homePort)), match_type: "Shared day off", match_key: "shared_day_off", overlap_window: allDay ? "All day" : formatWindow(window.start, window.end),
+        participants: entries.map((entry, index) => ({ label: `${entry.dutyCode} (${homePort(rosters[index]) || "home unknown"})`, window: allDay ? "All day" : offDayWindows(entry).map(w => formatWindow(w.start, w.end)).join(" / ") })), visual_group: "home_match" };
+    });
   });
 }
 
-const homePort = roster => roster.domicile || roster.base;
+const homePort = roster => roster.requiresDomicile ? null : roster.domicile || roster.base;
 
 function comparisonWindows(roster) {
-  return [...roster.portWindows, ...roster.offDays.filter(() => homePort(roster)).map(entry => ({
-    start: entry.date, end: addDays(entry.date, 1), port: homePort(roster), dutyCode: `${entry.dutyCode} (${homePort(roster)} · assumed home)`, assumed: true,
-  }))];
+  return [...roster.portWindows, ...roster.offDays.filter(() => homePort(roster)).flatMap(entry => offDayWindows(entry).map(window => ({
+    ...window, port: homePort(roster), dutyCode: `${entry.dutyCode} (${homePort(roster)} · assumed home)`, assumed: true,
+  })))];
 }
 
 function compareGroupPortMatches(rosters, portMatchWindowMs) {
@@ -169,6 +183,109 @@ function compareGroupPortMatches(rosters, portMatchWindowMs) {
   }
   for (const window of windows[0]) intersect(1, window.port, window.start.getTime(), window.end.getTime(), [window]);
   return matches;
+}
+
+function classifyNonFlyingDuty(entry) {
+  const code = String(entry.dutyCode || "").replace(/\(T\)$/i, "").trim().toUpperCase();
+  const text = `${code} ${entry.detail || ""} ${entry.service || ""}`.toUpperCase();
+  if (["A", "X", "RX", "D/O", "A/V"].includes(code)) return { kind: "off", label: `${code} · day off`, assumeHome: true };
+  if (LEAVE_LABELS[code]) return { kind: "leave", label: `${code} · ${LEAVE_LABELS[code]}`, assumeHome: !["SL", "UL"].includes(code) };
+  if (SHORT_HAUL_RESERVE_DUTY_REGEX.test(code)) return { kind: "reserve", label: code === "SR" ? "SR · standby" : `${code} · reserve` };
+  if (code === "TSPD") return { kind: "training", label: "TSPD", rulePort: "MEL", ruleSource: "Roster Export TSPD Melbourne rule" };
+  if (/\bSIM[A-Z0-9]*\b/.test(text)) {
+    const exercise = text.match(/\bSIM([A-Z0-9]{4})\b/) || text.match(/\bSIM\s+([A-Z0-9]{4})\b/);
+    return { kind: "sim", label: exercise ? `SIM · Ex ${exercise[1]}` : "SIM · simulator" };
+  }
+  const emergency = text.match(/\bEP[AC]([A-Z]{2})?\b/);
+  if (emergency) return { kind: "training", label: `${emergency[0]} · emergency procedures`, rulePort: EMERGENCY_PORTS[emergency[1]] || null, ruleSource: "Roster Export EPA/EPC location code" };
+  if (/^(?:EPA|EPC|EPE|TPA|TPAX|TNR|PMI|EBT)/.test(code) || /\b(?:TRAIN\w*|TRG)\b/.test(text)) return { kind: "training", label: `${code} · ground / training duty` };
+  return null;
+}
+
+function validDutyTime(value) {
+  return /^\d{4}$/.test(value || "") && Number(value.slice(0, 2)) < 24 && Number(value.slice(2)) < 60;
+}
+
+function dutyTimeWindow(entry) {
+  if (!validDutyTime(entry.report) || !validDutyTime(entry.end)) return null;
+  const start = combineDateTime(entry.date, entry.report);
+  let end = combineDateTime(entry.date, entry.end);
+  if (end <= start) end = combineDateTime(addDays(entry.date, 1), entry.end);
+  return { start, end, source: "Roster report / end times" };
+}
+
+function resolveNonFlyingDuties(calendar, patterns, trips, base) {
+  const portWindows = [], unresolvedDuties = [];
+  const legs = trips.flatMap(trip => trip.legs);
+  const definitions = Array.isArray(patterns) ? patterns : [...patterns.values()];
+  const knownPorts = new Set([...KNOWN_PORTS, base, ...legs.flatMap(leg => [leg.origin, leg.destination])].filter(Boolean));
+  for (const entry of calendar) {
+    const info = classifyNonFlyingDuty(entry);
+    if (!info) continue;
+    entry.dutyInfo = info;
+    if (info.assumeHome) continue;
+    if (info.kind === "leave") {
+      info.issues = ["Leave location is not supplied; no home presence assumed."];
+      entry.uncertainty = info.issues.join(" ");
+      unresolvedDuties.push(entry);
+      continue;
+    }
+    const code = normalizeShortHaulCode(entry.dutyCode);
+    const services = new Set([code, ...(`${entry.detail || ""} ${entry.service || ""}`.match(/[A-Z0-9]+(?:\(T\))?/gi) || []).map(normalizeShortHaulCode)]);
+    let matchingLegs = legs.filter(leg => leg.origin === leg.destination && formatSortableLocalDate(leg.departureDateTime) === formatSortableLocalDate(entry.date) && services.has(normalizeShortHaulCode(leg.service)));
+    const matchingDefinition = definitions.find(pattern => services.has(normalizeShortHaulCode(pattern.code)) && (!pattern.coveredDates || pattern.coveredDates.has(formatSortableLocalDate(entry.date))));
+    const definitionLegs = matchingDefinition?.flights || matchingDefinition?.legs || [];
+    const definitionPorts = new Set(definitionLegs.flatMap(leg => [leg.origin, leg.destination]).filter(Boolean));
+    let port = null, locationSource = null;
+    if (/^[A-Z]{3}$/.test(entry.port || "") && !["UNK", "NIL"].includes(entry.port)) { port = entry.port; locationSource = "Roster port column"; }
+    if (!port && matchingLegs.length && new Set(matchingLegs.map(leg => leg.origin)).size === 1) { port = matchingLegs[0].origin; locationSource = "Matched same-port simulator / ground sector"; }
+    if (!port && definitionPorts.size === 1) { port = [...definitionPorts][0]; locationSource = "Same-port pattern definition"; }
+    if (!port && info.rulePort) { port = info.rulePort; locationSource = info.ruleSource; }
+    if (!port) {
+      const mentioned = [...new Set(String(entry.detail || "").toUpperCase().match(/\b[A-Z]{3}\b/g) || [])].filter(token => knownPorts.has(token));
+      if (mentioned.length === 1) { port = mentioned[0]; locationSource = "Airport code in roster detail"; }
+    }
+    if (!port && info.kind === "reserve" && base) { port = base; locationSource = "Roster base for reserve / standby"; }
+    let window = dutyTimeWindow(entry);
+    if (!matchingLegs.length && matchingDefinition?.flights?.length && definitionPorts.size === 1) matchingLegs = instantiatePattern(entry.date, matchingDefinition).map(leg => ({ ...leg.flight, departureDateTime: leg.departureDateTime, arrivalDateTime: leg.arrivalDateTime })).filter(leg => formatSortableLocalDate(leg.departureDateTime) === formatSortableLocalDate(entry.date));
+    if (!window && matchingLegs.length) window = { start: matchingLegs[0].departureDateTime, end: matchingLegs.at(-1).arrivalDateTime, source: "Matched ground-sector times" };
+    const issues = [];
+    if (!port) issues.push("Duty location is not supplied or cannot be decoded.");
+    if (!window) issues.push("Report / end times are missing or invalid; no full-day duty window inferred.");
+    Object.assign(info, { port, locationSource, timingSource: window?.source || null, start: window?.start || null, end: window?.end || null, issues });
+    if (issues.length) { entry.uncertainty = issues.join(" "); unresolvedDuties.push(entry); }
+    if (port && window) portWindows.push({ start: window.start, end: window.end, port, dutyCode: `${info.label} (${info.kind === "reserve" ? "on call" : "on duty"})`, matchType: info.kind === "reserve" ? "home_reserve" : "ground_duty", onDuty: info.kind !== "reserve", dutyLabel: info.label });
+  }
+  return { portWindows, unresolvedDuties };
+}
+
+function excludeGroundDutyFromLayovers(windows) {
+  const duties = windows.filter(window => window.onDuty);
+  return windows.flatMap(window => {
+    if (window.matchType !== "in_port") return [window];
+    let pieces = [window];
+    for (const duty of duties.filter(duty => duty.port === window.port)) {
+      pieces = pieces.flatMap(piece => {
+        if (duty.end <= piece.start || duty.start >= piece.end) return [piece];
+        return [piece.start < duty.start ? { ...piece, end: duty.start } : null,
+          piece.end > duty.end ? { ...piece, start: duty.end } : null].filter(Boolean);
+      });
+    }
+    return pieces;
+  });
+}
+
+function collectOffDays(calendar, occupiedWindows = []) {
+  const busy = new Set(calendar.filter(entry => !classifyNonFlyingDuty(entry)?.assumeHome).map(entry => formatSortableLocalDate(entry.date)));
+  return calendar.filter(entry => classifyNonFlyingDuty(entry)?.assumeHome && !busy.has(formatSortableLocalDate(entry.date))).map(entry => {
+    let pieces = [{ start: entry.date, end: addDays(entry.date, 1) }];
+    for (const occupied of occupiedWindows) pieces = pieces.flatMap(piece => {
+      if (occupied.end <= piece.start || occupied.start >= piece.end) return [piece];
+      return [piece.start < occupied.start ? { start: piece.start, end: occupied.start } : null,
+        piece.end > occupied.end ? { start: occupied.end, end: piece.end } : null].filter(Boolean);
+    });
+    return { ...entry, homeWindows: pieces };
+  }).filter(entry => entry.homeWindows.length);
 }
 
 export function parseRosterText(fileName, rawText) {
@@ -198,8 +315,13 @@ function parseLongHaulRoster(fileName, text, metadata) {
     throw new Error("No calendar entries could be parsed from the roster.");
   }
 
-  const offDays = calendar.filter((entry) => LONG_HAUL_OFF_DUTY_CODES.has(entry.dutyCode));
-  const { portWindows, unresolvedDuties, trips } = buildDutyWindows(calendar, patterns);
+  const flightData = buildDutyWindows(calendar, patterns);
+  const { trips } = flightData;
+  const nonFlying = resolveNonFlyingDuties(calendar, patterns, trips, metadata.base);
+  const offDays = collectOffDays(calendar, [...flightData.portWindows, ...nonFlying.portWindows, ...trips.flatMap(trip => trip.legs.map(leg => ({ start: leg.departureDateTime, end: leg.arrivalDateTime })))]);
+  const reserveDays = calendar.filter(entry => entry.dutyInfo?.kind === "reserve");
+  const portWindows = excludeGroundDutyFromLayovers([...flightData.portWindows, ...nonFlying.portWindows]);
+  const unresolvedDuties = [...flightData.unresolvedDuties, ...nonFlying.unresolvedDuties];
 
   return buildRosterRecord({
     crewName: metadata.crewName,
@@ -211,7 +333,7 @@ function parseLongHaulRoster(fileName, text, metadata) {
     calendar,
     patterns,
     offDays,
-    reserveDays: [],
+    reserveDays,
     trips,
     portWindows,
     unresolvedDuties,
@@ -227,11 +349,12 @@ function parseShortHaulRoster(fileName, text, metadata) {
     throw new Error("No calendar entries could be parsed from the roster.");
   }
 
-  const offDays = calendar.filter((entry) => isShortHaulOffDay(entry.dutyCode));
-  const reserveDays = calendar.filter((entry) => isShortHaulReserveDuty(entry.dutyCode));
-  const portWindows = buildShortHaulPortWindows(calendar, detailData.blocks, metadata.base);
-  const unresolvedDuties = buildShortHaulUnresolvedDuties(calendar, detailData.blocks);
   const trips = detailData.blocks.map((block) => ({ code: block.code, legs: block.legs }));
+  const nonFlying = resolveNonFlyingDuties(calendar, detailData.blocks, trips, metadata.base);
+  const offDays = collectOffDays(calendar, [...detailData.blocks.flatMap(block => block.portWindows), ...nonFlying.portWindows, ...trips.flatMap(trip => trip.legs.map(leg => ({ start: leg.departureDateTime, end: leg.arrivalDateTime })))]);
+  const reserveDays = calendar.filter(entry => entry.dutyInfo?.kind === "reserve");
+  const portWindows = excludeGroundDutyFromLayovers([...detailData.blocks.flatMap(block => block.portWindows), ...nonFlying.portWindows]);
+  const unresolvedDuties = [...buildShortHaulUnresolvedDuties(calendar, detailData.blocks), ...nonFlying.unresolvedDuties];
 
   return buildRosterRecord({
     crewName: metadata.crewName,
@@ -485,6 +608,12 @@ function parseShortHaulCalendarEntries(text, blocks, generationDate) {
 }
 
 function parseShortHaulCalendarLine(line) {
+  const compact = line.trim().match(/^(\d{2})\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\S+)(.*)$/);
+  if (compact && line.slice(8, 20).trim() !== compact[3] && classifyNonFlyingDuty({ dutyCode: compact[3], detail: compact[4] })) {
+    const rest = parseCalendarRest(compact[4]);
+    return { dayOfMonth: Number(compact[1]), rosterDay: compact[2], explicitDutyCode: compact[3], dutyCode: null, ...rest, port: null, service: null, code: null, duty: null };
+  }
+
   const datePart = line.slice(0, 8).trim();
   const [dayText, rosterDay] = datePart.split(/\s+/);
   if (!dayText || !rosterDay) {
@@ -580,32 +709,6 @@ function assignShortHaulCalendarDates(entries, anchorDate) {
   });
 }
 
-function buildShortHaulPortWindows(calendar, blocks, base) {
-  const windows = blocks.flatMap((block) => block.portWindows);
-
-  for (const entry of calendar) {
-    if (!isShortHaulReserveDuty(entry.dutyCode) || !entry.report || !entry.end) {
-      continue;
-    }
-
-    const start = combineDateTime(entry.date, entry.report);
-    let end = combineDateTime(entry.date, entry.end);
-    if (end < start) {
-      end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
-    }
-
-    windows.push({
-      start,
-      end,
-      port: base || entry.port || "?",
-      dutyCode: entry.dutyCode,
-      matchType: "home_reserve",
-    });
-  }
-
-  return windows;
-}
-
 function buildShortHaulUnresolvedDuties(calendar, blocks) {
   const coveredByCode = new Map();
   const servicesByDate = new Map();
@@ -625,7 +728,7 @@ function buildShortHaulUnresolvedDuties(calendar, blocks) {
   }
 
   return calendar.filter((entry) => {
-    if (!entry.dutyCode || isShortHaulOffDay(entry.dutyCode) || isShortHaulReserveDuty(entry.dutyCode)) {
+    if (!entry.dutyCode || entry.dutyInfo || isShortHaulOffDay(entry.dutyCode) || isShortHaulReserveDuty(entry.dutyCode)) {
       return false;
     }
 
@@ -798,7 +901,7 @@ function parseCalendarRest(rest) {
   const nonTimeTokens = tokens.filter((token) => !/^\d{4}$/.test(token));
 
   return {
-    detail: nonTimeTokens[0] || null,
+    detail: nonTimeTokens.join(" ") || null,
     report: timeTokens[0] || null,
     end: timeTokens[1] || null,
     credit,
@@ -930,31 +1033,26 @@ function buildDutyWindows(calendar, patterns) {
   const unresolvedDuties = [];
   const trips = [];
 
-  for (const group of groupCalendarDuties(calendar)) {
-    if (LONG_HAUL_OFF_DUTY_CODES.has(group[0].dutyCode)) {
-      continue;
-    }
-
-    const pattern = patterns.get(group[0].dutyCode);
+  const seenThrough = new Map();
+  for (const entry of calendar) {
+    const info = classifyNonFlyingDuty(entry);
+    if (info?.assumeHome || info?.kind === "leave" || info?.kind === "reserve") continue;
+    const pattern = patterns.get(entry.dutyCode);
     if (!pattern || !pattern.flights.length) {
-      unresolvedDuties.push(group[0]);
+      if (!info) unresolvedDuties.push({ ...entry, uncertainty: "No matching flight pattern or recognised non-flying duty." });
       continue;
     }
-
-    const instantiated = instantiatePattern(group[0].date, pattern);
-    if (!instantiated.length) {
-      unresolvedDuties.push(group[0]);
-      continue;
-    }
-
-    trips.push({ code: pattern.code, legs: instantiated.map((leg) => ({
-      ...leg.flight,
-      departureDateTime: leg.departureDateTime,
-      arrivalDateTime: leg.arrivalDateTime,
-    })) });
+    if (seenThrough.get(entry.dutyCode) >= entry.date.getTime()) continue;
+    const instantiated = instantiatePattern(entry.date, pattern);
+    if (!instantiated.length) { unresolvedDuties.push(entry); continue; }
+    seenThrough.set(entry.dutyCode, instantiated.at(-1).arrivalDateTime.getTime());
+    trips.push({ code: pattern.code, legs: instantiated.map(leg => ({ ...leg.flight, departureDateTime: leg.departureDateTime, arrivalDateTime: leg.arrivalDateTime })) });
 
     instantiated.forEach((leg, index) => {
       const { departureDateTime, arrivalDateTime, flight } = leg;
+      if (flight.origin === flight.destination && !calendar.some(row => classifyNonFlyingDuty(row) && row.dutyCode === flight.service && formatSortableLocalDate(row.date) === formatSortableLocalDate(departureDateTime))) {
+        portWindows.push({ start: departureDateTime, end: arrivalDateTime, port: flight.origin, dutyCode: `${flight.service} (on duty)`, matchType: "ground_duty", onDuty: true, dutyLabel: flight.service });
+      }
 
       if (index + 1 < instantiated.length) {
         const nextLeg = instantiated[index + 1];
@@ -972,36 +1070,6 @@ function buildDutyWindows(calendar, patterns) {
   }
 
   return { portWindows, unresolvedDuties, trips };
-}
-
-function groupCalendarDuties(calendar) {
-  const groups = [];
-  let currentGroup = [];
-
-  for (const entry of calendar) {
-    if (!currentGroup.length) {
-      currentGroup = [entry];
-      continue;
-    }
-
-    const previous = currentGroup[currentGroup.length - 1];
-    if (
-      entry.dutyCode === previous.dutyCode &&
-      differenceInDays(entry.date, previous.date) === 1
-    ) {
-      currentGroup.push(entry);
-      continue;
-    }
-
-    groups.push(currentGroup);
-    currentGroup = [entry];
-  }
-
-  if (currentGroup.length) {
-    groups.push(currentGroup);
-  }
-
-  return groups;
 }
 
 function instantiatePattern(anchorDate, pattern) {
@@ -1056,87 +1124,26 @@ function jsWeekdayToIso(jsDay) {
 }
 
 function compareDaysOff(rosterA, rosterB) {
-  const byDate = new Map(rosterB.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
-  const matches = [];
-
-  for (const entryA of rosterA.offDays) {
-    const key = formatSortableLocalDate(entryA.date);
-    const entryB = byDate.get(key);
-    if (!entryB) {
-      continue;
-    }
-
-    matches.push({
-      date: formatDisplayLocalDate(entryA.date),
-      sort_date: key,
-      port: formatHomePort(homePort(rosterA), homePort(rosterB)),
-      match_type: "Shared day off",
-      match_key: "shared_day_off",
-      overlap_window: "All day",
-      crew_a: `${entryA.dutyCode} (${homePort(rosterA) || "home unknown"})`,
-      crew_b: `${entryB.dutyCode} (${homePort(rosterB) || "home unknown"})`,
-      window_a: "All day",
-      window_b: "All day",
-      visual_group: "home_match",
-    });
-  }
-
-  return matches;
+  return compareGroupDaysOff([rosterA, rosterB]).map(genericMatchToLegacyMatch);
 }
 
-function compareReserveDays(rosterA, rosterB) {
+function compareReserveDays(rosterA, rosterB, thresholdMs = DEFAULT_PORT_MATCH_WINDOW_MS) {
   const matches = [];
-  const offDaysByDateA = new Map(rosterA.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
-  const offDaysByDateB = new Map(rosterB.offDays.map((entry) => [formatSortableLocalDate(entry.date), entry]));
-
-  for (const reserveEntry of rosterA.reserveDays || []) {
-    const key = formatSortableLocalDate(reserveEntry.date);
-    const offDayEntry = offDaysByDateB.get(key);
-    if (!offDayEntry || !reserveEntry.report || !reserveEntry.end) {
-      continue;
+  for (const [reserveRoster, offRoster, reserveIndex] of [[rosterA, rosterB, 0], [rosterB, rosterA, 1]]) {
+    for (const reserve of reserveRoster.portWindows.filter(window => window.matchType === "home_reserve")) {
+      for (const off of comparisonWindows(offRoster).filter(window => window.assumed && window.port === reserve.port)) {
+        const start = new Date(Math.max(reserve.start.getTime(), off.start.getTime()));
+        const end = new Date(Math.min(reserve.end.getTime(), off.end.getTime()));
+        if (end - start < thresholdMs) continue;
+        const participants = [{ label: reserve.dutyCode, window: formatWindow(reserve.start, reserve.end) }, { label: off.dutyCode, window: formatWindow(off.start, off.end) }];
+        if (reserveIndex) participants.reverse();
+        matches.push({ date: formatDisplayLocalDate(start), sort_date: formatSortableLocalDate(start), port: reserve.port,
+          match_type: reserve.port === reserveRoster.base ? "Reserve at base" : "Standby / reserve in port", match_key: "reserve_at_base",
+          overlap_window: formatWindow(start, end), crew_a: participants[0].label, window_a: participants[0].window,
+          crew_b: participants[1].label, window_b: participants[1].window, visual_group: "home_match" });
+      }
     }
-
-    if (!rosterA.base || rosterA.base !== homePort(rosterB)) continue;
-    const reserveWindow = buildReserveWindow(reserveEntry);
-    matches.push({
-      date: formatDisplayLocalDate(reserveEntry.date),
-      sort_date: key,
-      port: rosterA.base,
-      match_type: "Reserve at base",
-      match_key: "reserve_at_base",
-      overlap_window: formatWindow(reserveWindow.start, reserveWindow.end),
-      crew_a: `${reserveEntry.dutyCode} (${rosterA.base || "base unknown"})`,
-      crew_b: `${offDayEntry.dutyCode} (${homePort(rosterB) || "home unknown"})`,
-      window_a: formatWindow(reserveWindow.start, reserveWindow.end),
-      window_b: "All day",
-      visual_group: "home_match",
-    });
   }
-
-  for (const reserveEntry of rosterB.reserveDays || []) {
-    const key = formatSortableLocalDate(reserveEntry.date);
-    const offDayEntry = offDaysByDateA.get(key);
-    if (!offDayEntry || !reserveEntry.report || !reserveEntry.end) {
-      continue;
-    }
-
-    if (!rosterB.base || rosterB.base !== homePort(rosterA)) continue;
-    const reserveWindow = buildReserveWindow(reserveEntry);
-    matches.push({
-      date: formatDisplayLocalDate(reserveEntry.date),
-      sort_date: key,
-      port: rosterB.base,
-      match_type: "Reserve at base",
-      match_key: "reserve_at_base",
-      overlap_window: formatWindow(reserveWindow.start, reserveWindow.end),
-      crew_a: `${offDayEntry.dutyCode} (${homePort(rosterA) || "home unknown"})`,
-      crew_b: `${reserveEntry.dutyCode} (${rosterB.base || "base unknown"})`,
-      window_a: "All day",
-      window_b: formatWindow(reserveWindow.start, reserveWindow.end),
-      visual_group: "home_match",
-    });
-  }
-
   return dedupeMatches(matches);
 }
 
@@ -1204,6 +1211,8 @@ function buildSummary(roster) {
     unresolved_duties: roster.unresolvedDuties.map((entry) => ({
       date: formatDisplayLocalDate(entry.date),
       duty_code: entry.dutyCode,
+      label: entry.dutyInfo?.label || entry.dutyCode,
+      reason: entry.uncertainty || "Duty details are incomplete.",
     })),
     preview: roster.preview,
   };
@@ -1280,15 +1289,6 @@ function buildGroupNotes(rosters) {
     notes.push("No additional caveats.");
   }
   return notes;
-}
-
-function buildReserveWindow(entry) {
-  const start = combineDateTime(entry.date, entry.report);
-  let end = combineDateTime(entry.date, entry.end);
-  if (end < start) {
-    end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
-  }
-  return { start, end };
 }
 
 function buildDateParts(date) {
