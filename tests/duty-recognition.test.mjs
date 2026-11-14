@@ -85,7 +85,7 @@ QFA1259 PAX BNE/MEL FR 2045 1045 FR 2315 1315`);
   const windows = sharedCalendarWindows([roster, roster]);
   assert.ok(windows.some(window => window.onDuty));
   const calendar = model(roster);
-  assert.ok(calendar.weeks.flatMap(w => w.overlapLanes.flat()).some(bar => bar.label.includes('on duty')));
+  assert.ok(calendar.weeks.flatMap(w => w.overlaps).some(bar => bar.onDuty));
   assert.ok(compareRosterGroup([roster, roster]).matches.some(m => m.participants.some(p => p.label.includes('on duty'))));
 });
 test('standby uses base and real overnight times; untimed standby stays a marker', () => {
@@ -203,4 +203,45 @@ test('unrelated flights elsewhere in the roster do not stop standalone SIM base 
 QF1 PAX MEL/SYD MO 0800 0200 MO 1000
 QF2 PAX SYD/MEL MO 1200 0200 MO 1400`, 'MEL');
   assert.ok(roster.calendar.filter(row=>row.dutyInfo?.kind==='sim').every(row=>row.dutyInfo.port==='MEL'));
+});
+
+
+function shortDutyRoster(rows,base='ADL') {
+  return parseRosterText('short-duties.txt',`SH Flight Crew Roster\nName: TEST PILOT Category: CPT\nBase: ${base}\nDate: 14 Nov 2026\n1 Dec 2026 - 4 Dec 2026\nDate    Duty(Role)                  S-On\n${rows}\nGlobal Preferences`);
+}
+test('short-haul AV is a full day off at domicile, alongside A/V and D/O', () => {
+  const roster=shortDutyRoster('01 Tue  D/O\n02 Wed  AV\n03 Thu  A/V\n04 Fri  D/O');roster.domicile='MEL';
+  assert.deepEqual(roster.offDays.map(row=>row.dutyCode),['D/O','AV','A/V','D/O']);
+  assert.equal(roster.unresolvedDuties.length,0);
+  const windows=sharedCalendarWindows([roster,roster]);
+  assert.ok(windows.every(w=>w.port==='MEL'));
+  assert.equal(windows[0].start.getDate(),1);assert.equal(windows[0].end.getDate(),5);
+  assert.ok(compareRosterGroup([roster,roster]).matches.some(m=>m.sort_date==='2026-12-02'&&m.match_key==='shared_day_off'));
+});
+test('short-haul MS is on duty at base, separate from domicile and home time on either side', () => {
+  const roster=shortDutyRoster('01 Tue  MS 1200 1201\n02 Wed  AV\n03 Thu  D/O\n04 Fri  D/O');roster.domicile='MEL';
+  const ms=roster.calendar[0];
+  assert.equal(ms.dutyInfo.port,'ADL');assert.equal(ms.dutyInfo.kind,'base_duty');
+  assert.equal(roster.offDays.some(row=>row.dutyCode==='MS'),false);
+  assert.equal(roster.unresolvedDuties.length,0);
+  const duty=roster.portWindows.find(window=>window.dutyLabel.includes('MS'));
+  assert.equal(duty.port,'ADL');assert.equal(duty.onDuty,true);assert.equal(duty.end-duty.start,60000);
+  const visitor=shortDutyRoster('01 Tue  D/O\n02 Wed  D/O\n03 Thu  D/O\n04 Fri  D/O');
+  const overlap=sharedCalendarWindows([roster,visitor],1).find(w=>w.onDuty);
+  assert.equal(overlap.port,'ADL');assert.equal(overlap.start.getHours(),12);assert.equal(overlap.end.getMinutes(),1);
+  assert.ok(roster.homeBoundaryWindows.some(w=>w.kind==='before'&&w.end.getHours()===12));
+  assert.ok(roster.homeBoundaryWindows.some(w=>w.kind==='after'&&w.start.getMinutes()===1));
+  assert.ok(buildRosterCalendar([roster,visitor],new Date(2026,11,1),{minOverlapMinutes:1}).weeks.flatMap(w=>w.rows[0]).some(cell=>cell.label.includes('ADL · MS')));
+});
+test('untimed short-haul MS retains its base location without a fabricated duty interval', () => {
+  const roster=shortDutyRoster('01 Tue  MS\n02 Wed  AV\n03 Thu  D/O\n04 Fri  D/O');
+  assert.equal(roster.calendar[0].dutyInfo.port,'ADL');
+  assert.equal(roster.portWindows.length,0);assert.equal(roster.unresolvedDuties.length,1);
+  assert.match(roster.unresolvedDuties[0].uncertainty,/times are missing/);
+  assert.doesNotMatch(roster.unresolvedDuties[0].uncertainty,/location/);
+});
+test('AV and MS rules apply to short-haul rosters only', () => {
+  const roster=parse('21/05 T AV\n22/05 F MS 1200 1201','','MEL');
+  assert.equal(roster.offDays.length,0);assert.equal(roster.portWindows.length,0);
+  assert.equal(roster.unresolvedDuties.length,2);
 });

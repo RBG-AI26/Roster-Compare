@@ -8,13 +8,13 @@ Browser-only web app for loading up to five crew roster text files and comparing
 - Process files immediately and show crew names, staff numbers, bases and bid periods
 - Compare automatically on upload and retain results for every crew selection
 - Resolve short-haul calendar dates from printed period dates or matching dated flight details, checking weekdays and month/year rollovers
-- Select any two to five loaded crew for a comparison of overlap shared by everyone selected
+- Select any two to five loaded crew; the Together timeline shows matching pairs and larger groups, while the table retains matches shared by all selected crew
 - Add or remove rosters without reloading the other files
 - Report unreadable files individually and skip duplicate roster contents
 - Works directly in desktop browsers plus Safari on iPhone and iPad
 - Installable PWA with an offline app shell
 - Saves loaded rosters, crew selection, filter and threshold locally on the device; restores existing two/three-roster saves
-- Compares shared days off: `A`, `X`, `RX`, `AL`, `GL`, `HL`, `LSL` (plus short-haul `D/O`, `LA`, `A/V`)
+- Compares shared days off: `A`, `X`, `RX`, `AL`, `GL`, `HL`, `LSL` (plus short-haul `D/O`, `LA`, `AV`, `A/V`)
 - Compares same-port shared time using a configurable minutes-in-port threshold
 - Includes partial days before duty report and after release, with the exact overlap times
 - Marks unresolved duties as uncertain
@@ -34,7 +34,7 @@ If you want to run it locally without deploying, serve the repository as a stati
 
 ## Calendar
 
-The calendar appears above the comparison table. Full roster is the default and covers the union of the selected rosters' dates, with no six-week limit. Use Calendar range to switch to Month view. The range and displayed month are saved on the device. It updates with the selected crew and the port-match threshold. Green bars indicate a shared port that is everyone's domicile, purple indicates one or more crew's domiciles, and blue indicates an away port for everyone. Every selected pilot must share the highlighted port window.
+The calendar appears above the comparison table. Full roster is the default and covers the union of the selected rosters' dates, with no six-week limit. Use Calendar range to switch to Month view. The range and displayed month are saved on the device. It updates with the selected crew and the port-match threshold. Together highlights any two or more selected pilots sharing a port. Green indicates home for all pilots in that matching group, purple indicates home for some of them, and blue indicates away for all of them. An unavailable pilot does not hide another pair's overlap.
 
 Each crew card has a Home city / domicile selector limited to Adelaide, Brisbane, Canberra, Darwin, Hobart, Melbourne, Perth and Sydney. It defaults to the roster base when that is an Australian capital. A saved non-capital domicile falls back to a capital-city base; otherwise choose a capital before any home presence is assumed. Days off use the selected domicile. Changing domicile immediately recalculates both the calendar and comparison table and saves the setting with that roster. Reserve / standby duties use their explicit roster port where supplied, otherwise the roster base. Duty start and finish days also include their free portions at the selected domicile. Commute time is not included. Unknown duties and missing roster dates never imply a location. Reserve windows are labelled **on call** and do not mean free time. Days off at different domiciles remain in the comparison table but do not create a shared-port calendar bar.
 
@@ -42,13 +42,13 @@ The calendar uses the existing parser's roster-local wall dates and times; it do
 
 ## Duty start and finish days
 
-The calendar and comparison table include assumed domicile presence before report and after release, as well as full days off. For example, a duty landing at 05:00 and releasing at **05:30 on 15 December** becomes available from **05:30**, not midnight the next day and not the landing time. A following duty starting at 07:45 ends the shared window at 07:45. These intersections apply to any two to five selected pilots and use the same minimum-overlap threshold.
+The calendar and comparison table include assumed domicile presence before report and after release, as well as full days off. For example, a duty landing at 05:00 and releasing at **05:30 on 15 December** becomes available from **05:30**, not midnight the next day and not the landing time. A following duty starting at 07:45 ends the shared window at 07:45. The timeline qualifies pairs using the minimum-overlap threshold and combines coincident pairs into larger groups. The table continues to require all selected pilots to overlap.
 
 ARMS calendar columns retain separate report-only and end-only fields. Short-haul calendar report/release times and printed `Rpt` / `Rls` pattern detail times are supported. Known training and reserve duties use their resolved location and valid times; a single known start or finish can supply availability on that side only. No release is invented from landing, credit or a standard post-flight allowance.
 
 Duty intervals cover complete trips, including layovers and interleaved training. Multiple separate duties on a date expose only the gaps between them; overnight duties trim the following day's day-off assumption. Unknown duties, missing dates and unresolved locations do not become inferred home time. A partial interval is assigned to the selected domicile only when its neighbouring duty endpoints are at the roster base or that domicile. Changing domicile recalculates the matches without changing the roster base. Domicile presence is an assumption and includes no commute allowance or time-zone conversion.
 
-Click a pilot's start/finish-day bar to see its home-availability intervals. Shared calendar highlights merge consecutive compatible home intervals. Their details show only the common overlap period, location and participating pilots, with on-duty/on-call status where relevant. Assumption annotations and asterisks are omitted from the interface; location and interval calculations are unchanged. The table labels partial-day home intersections **Shared time off**, under the existing Port match filter; full shared days off retain their separate rows.
+Click a pilot's start/finish-day bar to see its home-availability intervals. The Together section has one 24-hour strip per day. Segments fill only the shared hours, with gaps retained. Adjacent intervals merge when their ports, matching pilots and duty status agree; continuous periods join across date cells. Labels use port codes; with three to five pilots selected they also show each matching group's size. Clicking lists only the pilots in that group. Membership changes split the period so a joining or departing pilot cannot appear in the wrong interval. Simultaneous pairs at different ports occupy one compact segment, with separate port-specific groups in its details. Solid segments mean free time, stripes mean on call, and dots mean on duty. Duplicate representations are consolidated; duty/on-call status takes priority over a simultaneous free representation. Simultaneous port groups share one segment labelled with both ports. Clicking any daily segment shows the complete continuous overlap period, location and participating pilots, with on-duty/on-call status where relevant. Assumption annotations and asterisks are omitted from the interface; location and interval calculations are unchanged. The table labels partial-day home intersections **Shared time off**, under the existing Port match filter; full shared days off retain their separate rows.
 
 ## Non-flying duties
 
@@ -56,7 +56,9 @@ Duty recognition follows the sibling **Roster Export iCal** app's `public/shared
 
 | Roster code | Treatment |
 | --- | --- |
-| `RX` | X-style day off at the selected domicile, marked as assumed |
+| `RX` | X-style day off at the selected domicile |
+| Short-haul `AV`, `A/V` | Full day off at the selected domicile |
+| Short-haul `MS` | Duty at the roster base, using printed report/end times; distinct from a day off or reserve |
 | `EPA` / `EPC` | Emergency procedures; `SY` → SYD, `ML` → MEL, `BN` → BNE, `PH` → PER |
 | `TSPD` | Training in MEL, matching the export app's Melbourne rule |
 | `SIM…` | Simulator; retain the exercise code. Explicit ports, same-port sectors/patterns and airport detail take priority, followed by associated positioning / flight sectors. Without associated travel, use the roster base (not domicile). |

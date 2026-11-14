@@ -24,7 +24,7 @@
         }
       } catch { /* Use the default theme if storage is unavailable. */ }
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20261115-4" />
+    <link rel="stylesheet" href="./styles.css?v=20261115-7" />
   </head>
   <body>
     <main class="shell">
@@ -56,7 +56,7 @@
             <h2 id="crew-heading">Choose crew to compare</h2>
             <span id="selection-count" class="pill">0 selected</span>
           </div>
-          <p class="panel-copy">Select two to five crew. Results update automatically and show time shared by everyone selected.</p>
+          <p class="panel-copy">Select two to five crew. Together shows matching pairs and larger groups. The table shows matches shared by all selected crew.</p>
           <div id="crew-list" class="crew-list"></div>
         </section>
       </form>
@@ -85,12 +85,13 @@
             <button id="calendar-next" class="calendar-nav" type="button" aria-label="Next month">→</button>
           </div>
           <div id="calendar-crew-legend" class="calendar-crew-legend"></div>
-          <p class="calendar-help">Pilot rows show trips, ground duties and home days. Highlighted bars show time in the same port for everyone selected; click for exact times. Dates and times follow the roster’s local dates. Training overlaps are labelled on duty; reserve means on call. Shared days off at different domiciles appear in the table below.</p>
+          <p class="calendar-help">Pilot rows show trips, ground duties and home days. Together shows two or more selected pilots in the same port. Numbers show the group size; click for names and exact times. Dates and times follow the roster’s local dates. Together timelines run from 00:00 to 24:00 each day; gaps show no qualifying shared period. Shared days off at different domiciles appear in the table below.</p>
           <div class="calendar-legend" aria-label="Shared-time colours">
-            <span class="calendar-all-home">Everyone’s home city</span>
-            <span class="calendar-some-home">Someone’s home city</span>
-            <span class="calendar-all-away">Away for everyone</span>
+            <span class="calendar-all-home">Home for the group</span>
+            <span class="calendar-some-home">Home for some</span>
+            <span class="calendar-all-away">Away for the group</span>
           </div>
+          <div class="calendar-time-key" aria-label="Timeline styles"><span><i class="calendar-key-swatch" aria-hidden="true"></i>Free time</span><span><i class="calendar-key-swatch on-call" aria-hidden="true"></i>On call</span><span><i class="calendar-key-swatch on-duty" aria-hidden="true"></i>On duty</span></div>
           <div class="calendar-scroll" tabindex="0" role="region" aria-label="Roster calendar, scroll horizontally on smaller screens">
             <div id="calendar-grid" class="calendar-grid" role="table" aria-label="Pilot rosters and shared time"></div>
           </div>
@@ -104,8 +105,8 @@
 
         <article class="results-card">
           <div class="results-head">
-            <h2>Port Matches</h2>
-            <p>Times are shown in roster local time.</p>
+            <h2>Whole-group matches</h2>
+            <p>Shared by all selected pilots · roster local time.</p>
           </div>
           <div id="match-filters" class="filter-bar" role="tablist" aria-label="Match filters">
             <button type="button" class="filter-chip is-active" data-filter="all">All</button>
@@ -127,6 +128,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js?v=20261115-4"></script>
+    <script type="module" src="./app.js?v=20261115-7"></script>
   </body>
 </html>

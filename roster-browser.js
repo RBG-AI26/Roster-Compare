@@ -4,7 +4,7 @@ const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "RX", "AL", "GL", "HL", "LSL
 const LEAVE_LABELS = { AL: "Annual leave", GL: "Golden leave", HL: "High priority leave", LSL: "Long service leave", LA: "Leave", SL: "Sick leave", UL: "Upline sick leave" };
 const EMERGENCY_PORTS = { SY: "SYD", ML: "MEL", BN: "BNE", PH: "PER" };
 const KNOWN_PORTS = new Set(["ADL", "MEL", "SYD", "BNE", "PER", "DRW", "HBA", "CBR", "OOL", "CNS", "AKL", "WLG", "CHC", "SIN", "HKG", "NRT", "HND", "LAX", "LHR", "DFW", "JNB", "SCL", "DPS", "BKK", "NAN", "HTI", "MCY", "TSV", "NTL"]);
-const SHORT_HAUL_OFF_DUTY_CODES = new Set(["D/O", "LA", "A/V", ...LONG_HAUL_OFF_DUTY_CODES]);
+const SHORT_HAUL_OFF_DUTY_CODES = new Set(["D/O", "LA", "AV", "A/V", ...LONG_HAUL_OFF_DUTY_CODES]);
 const SHORT_HAUL_RESERVE_DUTY_REGEX = /^(?:SR|R(?:[0-9]+|SV|ES(?:ERVE)?)?)$/i;
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_CODES = new Map([
@@ -185,10 +185,12 @@ function compareGroupPortMatches(rosters, portMatchWindowMs) {
   return matches;
 }
 
-function classifyNonFlyingDuty(entry) {
+function classifyNonFlyingDuty(entry, shortHaul = entry.rosterType === "short-haul") {
   const code = String(entry.dutyCode || "").replace(/\(T\)$/i, "").trim().toUpperCase();
   const text = `${code} ${entry.detail || ""} ${entry.service || ""}`.toUpperCase();
   if (["A", "X", "RX", "D/O", "A/V"].includes(code)) return { kind: "off", label: `${code} · day off`, assumeHome: true };
+  if (shortHaul && code === "AV") return { kind: "off", label: "AV · day off", assumeHome: true };
+  if (shortHaul && code === "MS") return { kind: "base_duty", label: "MS · duty at base" };
   if (LEAVE_LABELS[code]) return { kind: "leave", label: `${code} · ${LEAVE_LABELS[code]}`, assumeHome: !["SL", "UL"].includes(code) };
   if (SHORT_HAUL_RESERVE_DUTY_REGEX.test(code)) return { kind: "reserve", label: code === "SR" ? "SR · standby" : `${code} · reserve` };
   if (code === "TSPD") return { kind: "training", label: "TSPD", rulePort: "MEL", ruleSource: "Roster Export TSPD Melbourne rule" };
@@ -274,6 +276,7 @@ function resolveNonFlyingDuties(calendar, patterns, trips, base) {
       else if (!travel.hasTravel && base) { port = base; locationSource = "Roster base: SIM without associated positioning sectors"; }
     }
     if (!port && info.kind === "reserve" && base) { port = base; locationSource = "Roster base for reserve / standby"; }
+    if (info.kind === "base_duty") { port = base || null; locationSource = base ? "Roster base for MS duty" : null; }
     let window = dutyTimeWindow(entry);
     if (!matchingLegs.length && matchingDefinition?.flights?.length && definitionPorts.size === 1) matchingLegs = instantiatePattern(entry.date, matchingDefinition).map(leg => ({ ...leg.flight, departureDateTime: leg.departureDateTime, arrivalDateTime: leg.arrivalDateTime })).filter(leg => formatSortableLocalDate(leg.departureDateTime) === formatSortableLocalDate(entry.date));
     if (!window && matchingLegs.length) window = { start: matchingLegs[0].departureDateTime, end: matchingLegs.at(-1).arrivalDateTime, source: "Matched ground-sector times" };
@@ -761,7 +764,7 @@ function parseShortHaulCalendarEntries(text, blocks, generationDate) {
 
 function parseShortHaulCalendarLine(line) {
   const compact = line.trim().match(/^(\d{2})\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\S+)(.*)$/);
-  if (compact && line.slice(8, 20).trim() !== compact[3] && classifyNonFlyingDuty({ dutyCode: compact[3], detail: compact[4] })) {
+  if (compact && line.slice(8, 20).trim() !== compact[3] && classifyNonFlyingDuty({ dutyCode: compact[3], detail: compact[4] }, true)) {
     const rest = parseCalendarRest(compact[4]);
     return { dayOfMonth: Number(compact[1]), rosterDay: compact[2], explicitDutyCode: compact[3], dutyCode: null, ...rest, port: null, service: null, code: null, duty: null };
   }
@@ -847,6 +850,7 @@ function assignShortHaulCalendarDates(entries, anchorDate) {
 
     return {
       date: new Date(currentYear, currentMonth, entry.dayOfMonth),
+      rosterType: "short-haul",
       rosterDay: entry.rosterDay,
       dutyCode: entry.dutyCode,
       explicitDutyCode: entry.explicitDutyCode,
