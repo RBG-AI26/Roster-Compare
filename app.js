@@ -1,5 +1,5 @@
-import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261115-7";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261115-7";
+import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261115-8";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261115-8";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const THEME_STORAGE_KEY = "roster-compare-theme";

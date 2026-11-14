@@ -270,14 +270,14 @@ test('three selected pilots automatically retain a matching pair when the third 
   await ui.add([file(0),file(1),unknown]);
   assert.equal(ui.elements.get('selection-count').textContent,'3 selected');
   const markup=ui.elements.get('calendar-grid').innerHTML;
-  assert.match(markup,/SYD · 2/);
+  assert.match(markup,/data-crew-combination="0,1"/);
   const id=markup.match(/class="calendar-bar calendar-overlap[^>]*data-calendar-detail="(\d+)"/)[1];
   ui.elements.get('calendar-grid').events.click({target:{closest:()=>({dataset:{calendarDetail:id}})}});
   assert.equal(ui.elements.get('calendar-detail-text').textContent,'A · SYD\nB · SYD');
   ui.select(0,false);
   assert.doesNotMatch(ui.elements.get('calendar-grid').innerHTML,/calendar-overlap/);
   ui.select(0,true);
-  assert.match(ui.elements.get('calendar-grid').innerHTML,/SYD · 2/);
+  assert.match(ui.elements.get('calendar-grid').innerHTML,/data-crew-combination="0,1"/);
   ui.remove(2);
   assert.equal(ui.elements.get('selection-count').textContent,'2 selected');
   assert.match(ui.elements.get('calendar-grid').innerHTML,/calendar-overlap/);

@@ -554,8 +554,12 @@ button:disabled { opacity: .4; }
 /* One clock strip per day replaces stacked, day-width overlap boxes. */
 .calendar-together { padding: 5px 0 9px; }
 .calendar-timeline-lane { min-height: 36px; }
-.calendar-timeline-cell { min-width: 0; padding: 4px 0; border-right: 1px solid var(--calendar-cell-line); }
-.calendar-time-track { position: relative; height: 28px; background: var(--surface2); border-radius: 3px; }
+.calendar-together-title { padding: 2px 8px 5px; color: var(--calendar-muted); font-size: .65rem; font-weight: 700; }
+.calendar-timeline-lane + .calendar-timeline-lane { border-top: 1px solid var(--calendar-cell-line); }
+.calendar-combination-name { flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; line-height: 1.25; font-size: .64rem; color: var(--text); }
+.calendar-combination-name > span { max-width: 100%; overflow-wrap: anywhere; }
+.calendar-timeline-cell { display: flex; align-items: center; min-width: 0; padding: 4px 0; border-right: 1px solid var(--calendar-cell-line); }
+.calendar-time-track { width: 100%; position: relative; height: 28px; background: var(--surface2); border-radius: 3px; }
 .roster-calendar .calendar-time-segment {
   position: absolute; inset-block: 0; margin: 0; min-width: 0; min-height: 0; height: 28px;
   padding: 0; border: 0; border-radius: 3px; display: flex; align-items: center;

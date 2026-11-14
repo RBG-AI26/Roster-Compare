@@ -158,7 +158,7 @@ test('an unavailable first pilot does not suppress a matching pair later in the 
  const matches=sharedCalendarWindows(rs);
  assert.equal(matches.length,1);assert.deepEqual(matches[0].crewIndices,[1,2]);
  const m=buildRosterCalendar(rs,d(1)),segment=m.weeks[1].timelineDays[2].segments[0];
- assert.equal(segment.label,'ADL · 2');assert.equal(segment.category,'all-home');
+ assert.equal(segment.label,'ADL');assert.equal(segment.category,'all-home');
  assert.equal(m.details[segment.detailId].text,'B · ADL\nC · ADL');
  assert.doesNotMatch(m.details[segment.detailId].text,/Absent/);
  assert.match(renderCalendarMarkup(m),/ADL · B \+ C · free time/);
@@ -167,21 +167,25 @@ test('membership changes from pair to triple and back preserve the exact people 
  const rs=[roster('A','ADL',{windows:[win('ADL',d(9,8),d(9,18))]}),roster('B','ADL',{windows:[win('ADL',d(9,8),d(9,18))]}),roster('C','MEL',{windows:[win('ADL',d(9,10),d(9,12))]})];
  const m=buildRosterCalendar(rs,d(1)),segments=m.weeks[1].timelineDays[2].segments;
  assert.deepEqual(segments.map(s=>[s.visibleStart.getHours(),s.visibleEnd.getHours(),s.crewIndices]),[[8,10,[0,1]],[10,12,[0,1,2]],[12,18,[0,1]]]);
- assert.deepEqual(segments.map(s=>s.label),['ADL · 2','ADL · 3','ADL · 2']);
+ assert.deepEqual(segments.map(s=>s.label),['ADL','ADL','ADL']);
  assert.deepEqual(segments.map(s=>s.category),['all-home','some-home','all-home']);
  assert.doesNotMatch(m.details[segments[0].detailId].text,/C ·/);
  assert.match(m.details[segments[1].detailId].text,/C · ADL/);
  assert.doesNotMatch(m.details[segments[2].detailId].text,/C ·/);
- assert.equal((renderCalendarMarkup(m).match(/calendar-timeline-lane/g)||[]).length,m.weeks.length);
+ assert.equal((renderCalendarMarkup(m).match(/calendar-timeline-lane/g)||[]).length,m.weeks.reduce((n,w)=>n+w.timelineRows.length,0));
+ assert.deepEqual(m.weeks[1].timelineRows.map(row=>row.crewIndices),[[0,1],[0,1,2]]);
+ assert.deepEqual(m.weeks[1].timelineRows.map(row=>row.days[2].segments.length),[2,1]);
 });
-test('simultaneous pairs at different ports keep distinct membership in one timeline segment',()=>{
+test('simultaneous pairs at different ports occupy their own named rows',()=>{
  const rs=[roster('A','ADL',{off:[9]}),roster('B','ADL',{off:[9]}),roster('C','MEL',{off:[9]}),roster('D','MEL',{off:[9]})];
- const m=buildRosterCalendar(rs,d(1)),segments=m.weeks[1].timelineDays[2].segments;
- assert.equal(segments.length,1);
- const segment=segments[0];assert.equal(segment.label,'ADL · 2 / MEL · 2');
- assert.deepEqual(segment.groups.map(group=>[group.port,group.crewIndices]),[['ADL',[0,1]],['MEL',[2,3]]]);
- assert.equal(m.details[segment.detailId].text,'A · ADL\nB · ADL\n\nC · MEL\nD · MEL');
- assert.doesNotMatch(m.details[segment.detailId].text,/A · MEL|C · ADL/);
+ const m=buildRosterCalendar(rs,d(1)),week=m.weeks[1];
+ assert.deepEqual(week.timelineRows.map(row=>[row.label,row.crewIndices]),[['A + B',[0,1]],['C + D',[2,3]]]);
+ assert.deepEqual(week.timelineRows.map(row=>row.days[2].segments[0].label),['ADL','MEL']);
+ assert.equal(m.details[week.timelineRows[0].days[2].segments[0].detailId].text,'A · ADL\nB · ADL');
+ assert.equal(m.details[week.timelineRows[1].days[2].segments[0].detailId].text,'C · MEL\nD · MEL');
+ const markup=renderCalendarMarkup(m);
+ assert.match(markup,/data-crew-combination="0,1"/);assert.match(markup,/data-crew-combination="2,3"/);
+ assert.match(markup,/aria-label="A \+ B"/);assert.match(markup,/aria-label="C \+ D"/);
 });
 test('a change of matching pair splits the interval even when the port and group size stay the same',()=>{
  const rs=[roster('A','MEL',{windows:[win('MEL',d(9,8),d(9,10))]}),roster('B','MEL',{windows:[win('MEL',d(9,8),d(9,12))]}),roster('C','MEL',{windows:[win('MEL',d(9,10),d(9,12))]})];
@@ -203,4 +207,35 @@ test('subset matches honour thresholds and cannot be made from one pilot or miss
  assert.equal(sharedCalendarWindows(rs,60).length,1);assert.equal(sharedCalendarWindows(rs,61).length,0);
  assert.equal(buildRosterCalendar(rs,d(1),{minOverlapMinutes:61}).weeks[1].timelineDays[2].segments.length,0);
  assert.equal(sharedCalendarWindows([rs[0],rs[2]]).length,0);
+});
+
+
+test('unrelated group status changes cannot fragment a continuous interval in another row',()=>{
+ const rs=[roster('A','ADL',{off:[9]}),roster('B','ADL',{off:[9]}),roster('C','MEL',{off:[9],windows:[{...win('MEL',d(9,10),d(9,11)),onDuty:true,matchType:'ground_duty'}]}),roster('D','MEL',{off:[9]})];
+ const m=buildRosterCalendar(rs,d(1)),rows=m.weeks[1].timelineRows;
+ const ab=rows.find(row=>row.key==='0,1').days[2].segments;
+ const cd=rows.find(row=>row.key==='2,3').days[2].segments;
+ assert.equal(ab.length,1);assert.equal(ab[0].visibleStart.getTime(),d(9).getTime());assert.equal(ab[0].visibleEnd.getTime(),d(10).getTime());
+ assert.equal(ab[0].onDuty,false);assert.equal(cd.length,3);assert.equal(cd[1].onDuty,true);
+});
+test('a weekly combination stays in the same row across port and on-call status changes',()=>{
+ const rs=['A','B'].map(n=>roster(n,'ADL',{off:[9],windows:[win('MEL',d(10,8),d(10,12))]}));
+ rs.push(roster('Unmatched','PER'));
+ rs[0].portWindows.push({...win('MEL',d(10,9),d(10,10)),matchType:'home_reserve'});
+ const m=buildRosterCalendar(rs,d(1)),rows=m.weeks[1].timelineRows;
+ assert.equal(rows.length,1);assert.equal(rows[0].key,'0,1');
+ assert.equal(rows[0].days[2].segments[0].port,'ADL');
+ assert.deepEqual(rows[0].days[3].segments.map(s=>s.reserve),[false,true,false]);
+ assert.ok(rows[0].days[3].segments.every(s=>s.port==='MEL'));
+});
+test('week boundaries preserve exact times and list only the combinations matching that week',()=>{
+ const rs=[roster('A','MEL',{windows:[win('SIN',d(6,10),d(7,12))]}),roster('B','MEL',{windows:[win('SIN',d(6,10),d(7,12)),win('SIN',d(8,10),d(8,12))]}),roster('C','MEL',{windows:[win('SIN',d(8,10),d(8,12))]})];
+ const m=buildRosterCalendar(rs,d(1));
+ assert.deepEqual(m.weeks[0].timelineRows.map(row=>row.key),['0,1']);
+ assert.deepEqual(m.weeks[1].timelineRows.map(row=>row.key),['0,1','1,2']);
+ assert.equal(m.weeks[0].timelineRows[0].days[6].segments[0].continuesAfter,true);
+ assert.equal(m.weeks[1].timelineRows[0].days[0].segments[0].visibleEnd.getTime(),d(7,12).getTime());
+ assert.equal(m.weeks[1].timelineRows[1].days[1].segments[0].visibleStart.getTime(),d(8,10).getTime());
+ assert.deepEqual(m.weeks[2].timelineRows.map(row=>row.key),['none']);
+ assert.ok(m.weeks[2].timelineRows[0].days.every(day=>day.segments.length===0));
 });
