@@ -1,10 +1,10 @@
 # Roster Compare
 
-Browser-only web app for loading up to five crew roster text files and comparing selected crew.
+Browser-only web app for loading roster text files for up to five pilots and comparing selected crew.
 
 ## Current Scope
 
-- Add up to five TXT rosters through one multi-file picker or drag-and-drop area
+- Add TXT rosters for up to five pilots through one multi-file picker or drag-and-drop area
 - Process files immediately and show crew names, staff numbers, bases and bid periods
 - Compare automatically on upload and retain results for every crew selection
 - Resolve short-haul calendar dates from printed period dates or matching dated flight details, checking weekdays and month/year rollovers
@@ -14,7 +14,7 @@ Browser-only web app for loading up to five crew roster text files and comparing
 - Works directly in desktop browsers plus Safari on iPhone and iPad
 - Installable PWA with an offline app shell
 - Saves loaded rosters, crew selection, filter and threshold locally on the device; restores existing two/three-roster saves
-- Compares shared days off: `A`, `X`, `RX`, `AL`, `GL`, `HL`, `LSL` (plus short-haul `D/O`, `LA`, `AV`, `A/V`)
+- Compares shared days off: `A`, `X`, `RX`, `AL`, `GL`, `HL`, `LSL`, `LD` (plus short-haul `D/O`, `LA`, `AV`, `A/V`)
 - Compares same-port shared time using a configurable minutes-in-port threshold
 - Includes partial days before duty report and after release, with the exact overlap times
 - Marks unresolved duties as uncertain
@@ -28,9 +28,17 @@ PDF support is intentionally out of scope for this version. Two-crew comparisons
 
 ## Use
 
-Open the hosted web app and add up to five text rosters. The app parses them once, prepares and retains comparisons for every crew selection, and displays the selected crew immediately. Tick or untick crew to switch results. There is no manual Compare button. Results also update when files are added or removed. At least two selected crew are required; reducing the selection below two hides results but retains the comparisons for the next valid selection.
+Open the hosted web app and add text rosters for up to five pilots. The app parses them once, prepares and retains comparisons for every crew selection, and displays the selected crew immediately. Tick or untick crew to switch results. There is no manual Compare button. Results also update when files are added or removed. At least two selected crew are required; reducing the selection below two hides results but retains the comparisons for the next valid selection.
 
 If you want to run it locally without deploying, serve the repository as a static site with any simple file server.
+
+## Multiple periods for one pilot
+
+Upload each four-week short-haul period normally. Files with the same staff number combine into one pilot, one calendar row and one comparison participant. A unique matching name is used only when a staff number is missing; different staff numbers remain separate. More than five files are allowed when they belong to no more than five pilots. Adding a period preserves that pilot’s domicile, colour and selection. Removing a pilot removes all their periods. Existing saved imports are combined automatically on reload.
+
+The calendar retains actual period coverage and real gaps. Overlapping revisions replace whole dates, retaining multiple duties on each winning date. The later printed issue timestamp takes priority; without reliable timestamps, the later import takes priority.
+
+`LD` means defence leave and counts as time at the selected domicile in both short-haul and long-haul rosters.
 
 ## Calendar
 
@@ -74,7 +82,7 @@ Consecutive SIM sessions form one visit when checking associated travel, includi
 ## Mobile
 
 - Open the site in Safari on iPhone or iPad
-- Select up to five roster text files from Files
+- Select roster text files for up to five pilots from Files
 - Optional: use `Share` -> `Add to Home Screen`
 
 ## Deploy

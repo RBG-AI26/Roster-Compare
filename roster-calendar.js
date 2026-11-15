@@ -36,7 +36,7 @@ export function initialCalendarMonth(rosters) {
 function boundaryHomeWindows(roster) {
   const port = homePort(roster);
   if (!port) return [];
-  return (roster.homeBoundaryWindows || []).filter(window => window.anchorPorts.every(anchor => anchor === roster.base || anchor === port)).map(window => ({
+  return (roster.homeBoundaryWindows || []).filter(window => window.anchorPorts.every(anchor => anchor === (window.rosterBase || roster.base) || anchor === port)).map(window => ({
     ...window, port, assumed: true, reserve: false, onDuty: false,
     dutyCode: `${window.dutyCode} (${port})`,
   }));
@@ -148,7 +148,7 @@ function pilotDay(roster, date) {
   const entries = roster.calendar.filter(item => dateKey(item.date) === dateKey(date));
   const entry = entries[0];
   if (!entry) return { label: 'No roster', kind: 'unavailable', detail: 'No roster entry is available for this date.' };
-  const ground = roster.calendar.filter(item => item.dutyInfo && !item.dutyInfo.assumeHome && (entries.includes(item) || (item.dutyInfo.start < end && item.dutyInfo.end > start)));
+  const ground = roster.calendar.filter(item => (entry.sourcePeriod == null || item.sourcePeriod === entry.sourcePeriod) && item.dutyInfo && !item.dutyInfo.assumeHome && (entries.includes(item) || (item.dutyInfo.start < end && item.dutyInfo.end > start)));
   const available = boundaryHomeWindows(roster).filter(window => window.start < end && window.end > start);
   const clock = time => time.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', hour12:false});
   const availabilityLabel = available.length ? ` · ${homePort(roster)} home ${available.map(window => window.start <= start ? `until ${clock(window.end)}` : window.end >= end ? `from ${clock(window.start)}` : `${clock(window.start)}–${clock(window.end)}`).join(' / ')}` : '';
@@ -161,7 +161,7 @@ function pilotDay(roster, date) {
       info.start ? `${formatTime(info.start)} – ${formatTime(info.end)} · ${info.timingSource}` : null,
       ...(info.issues || []), info.kind === 'reserve' ? 'On call; this does not imply free time.' : info.kind !== 'leave' ? 'On duty; this does not imply free time.' : null].filter(Boolean).join('\n');
   };
-  const allLegs = (roster.trips || []).flatMap(trip => trip.legs).filter(leg => leg.departureDateTime < end && leg.arrivalDateTime > start);
+  const allLegs = (roster.trips || []).flatMap(trip => trip.legs).filter(leg => (entry.sourcePeriod == null || leg.sourcePeriod === entry.sourcePeriod) && leg.departureDateTime < end && leg.arrivalDateTime > start);
   const legs = allLegs.filter(leg => leg.origin !== leg.destination);
   if (legs.length) {
     const route = [legs[0].origin];
@@ -180,7 +180,7 @@ function pilotDay(roster, date) {
     detail: allLegs.map(leg => `${leg.service || 'Ground duty'} · ${leg.origin}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}\nOn duty; this does not imply free time.`).join('\n\n') };
   const offDay = roster.offDays.some(item => dateKey(item.date) === dateKey(date));
   const home = homePort(roster);
-  if (offDay) return { label: home ? `${home} · home` : roster.requiresDomicile ? 'Day off · choose domicile' : 'Day off · base unknown', kind: 'home', detail: `${entry.dutyCode} · day off${home ? `\n${home}${homeDetail || `\n${formatTime(start)} – ${formatTime(end)}`}` : '\nHome location is not set.'}` };
+  if (offDay) return { label: home ? `${home} · home` : roster.requiresDomicile ? 'Day off · choose domicile' : 'Day off · base unknown', kind: 'home', detail: `${entry.dutyInfo?.kind === 'leave' ? entry.dutyInfo.label : `${entry.dutyCode} · day off`}${home ? `\n${home}${homeDetail || `\n${formatTime(start)} – ${formatTime(end)}`}` : '\nHome location is not set.'}` };
   const reserve = (roster.reserveDays || []).some(item => dateKey(item.date) === dateKey(date));
   if (reserve) return { label: `${roster.base || 'Base unknown'} · reserve`, kind: 'reserve', detail: `${entry.dutyCode} · reserve at base${entry.report && entry.end ? `\n${entry.report} – ${entry.end} roster local time` : '\nReserve times are unavailable.'}\nOn call; this does not imply free time.` };
   if (available.length) return { label: `${entry.dutyCode}${availabilityLabel}`, kind: 'home', detail: `${entry.dutyCode}${availabilityDetail}` };

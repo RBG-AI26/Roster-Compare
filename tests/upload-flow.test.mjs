@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { shortPeriod } from './fixtures/short-period.mjs';
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const app = (await readFile(new URL('../app.js', import.meta.url), 'utf8')).replace(/^import .*;\n/gm, '');
 const parserSource = await readFile(new URL('../roster-browser.js', import.meta.url), 'utf8');
@@ -9,6 +10,80 @@ const parser = await import(`data:text/javascript;base64,${Buffer.from(parserSou
 const calendarSource = await readFile(new URL('../roster-calendar.js', import.meta.url), 'utf8');
 const calendar = await import(`data:text/javascript;base64,${Buffer.from(calendarSource).toString('base64')}`);
 const storageKey = 'roster-compare-state-v2';
+const periodFile = options => ({ name: `period-${options?.bid || '1'}.txt`, type: 'text/plain', text: async () => shortPeriod(options) });
+
+test('multiple short-haul files import as one pilot and one calendar row', async () => {
+  const ui = setup();
+  await ui.add([periodFile({ duty: 'LD' }), periodFile({ start: new Date(2026, 10, 30), bid: '2' })]);
+  assert.equal(ui.elements.get('roster-count').textContent, '1 / 5 loaded');
+  assert.equal(ui.elements.get('selection-count').textContent, '1 selected');
+  assert.equal(ui.comparisonCalls(), 0);
+  assert.equal(ui.elements.get('results').classList.contains('hidden'), true);
+  assert.match(ui.elements.get('crew-list').innerHTML, /2 roster files/);
+  const other = periodFile({ staff: '654321', name: 'TEST PILOT B' });
+  await ui.add([other]);
+  assert.equal(ui.elements.get('selection-count').textContent, '2 selected');
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.calendar.length', ui.context), 56);
+  assert.equal(vm.runInContext('calendarModel.weeks.length', ui.context), 8);
+  assert.equal(vm.runInContext('calendarModel.weeks.every(week => week.rows.length === 2 && week.rows[0].every(cell => cell.kind !== "unavailable"))', ui.context), true);
+});
+
+test('additional periods preserve pilot settings and grouped files survive reload', async () => {
+  const ui = setup();
+  await ui.add([periodFile(), file(0)]);
+  ui.domicile(0, 'ADL'); ui.select(0, false);
+  const colour = vm.runInContext('loadedRosters[0].parsed.colour', ui.context);
+  await ui.add([periodFile({ start: new Date(2026, 10, 30), bid: '2' })]);
+  assert.equal(ui.elements.get('selection-count').textContent, '1 selected');
+  const saved = JSON.parse(ui.store.get(storageKey));
+  assert.equal(saved.currentInputs.rosters[0].files.length, 2);
+  assert.equal(saved.currentInputs.rosters[0].domicile, 'ADL');
+  assert.equal(saved.currentInputs.rosters[0].colour, colour);
+  const restored = setup(saved);
+  assert.equal(restored.elements.get('roster-count').textContent, '2 / 5 loaded');
+  assert.equal(restored.elements.get('selection-count').textContent, '1 selected');
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.calendar.length', restored.context), 56);
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.domicile', restored.context), 'ADL');
+  restored.remove(0);
+  assert.equal(JSON.parse(restored.store.get(storageKey)).currentInputs.rosters.length, 1);
+});
+
+test('legacy saved periods for the same staff number automatically migrate to one pilot', () => {
+  const ui = setup({ currentInputs: { rosters: [
+    { fileName: 'nov.txt', text: shortPeriod(), domicile: 'ADL', selected: false },
+    { fileName: 'dec.txt', text: shortPeriod({ start: new Date(2026, 10, 30) }), selected: true }, roster(0),
+  ] } });
+  assert.equal(ui.elements.get('roster-count').textContent, '2 / 5 loaded');
+  assert.equal(ui.elements.get('selection-count').textContent, '2 selected');
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.calendar.length', ui.context), 56);
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.domicile', ui.context), 'ADL');
+});
+
+test('pilot capacity counts people, allowing more than five files and new periods at capacity', async () => {
+  const ui = setup();
+  await ui.add([periodFile(), periodFile({ start: new Date(2026, 10, 30) }), ...[0, 1, 2, 3].map(file)]);
+  assert.equal(ui.elements.get('roster-count').textContent, '5 / 5 loaded');
+  await ui.add([periodFile({ start: new Date(2026, 11, 28), bid: '3' })]);
+  assert.equal(vm.runInContext('loadedRosters[0].files.length', ui.context), 3);
+  await ui.add([periodFile()]);
+  assert.match(ui.elements.get('upload-status').textContent, /already loaded/);
+  await ui.add([file(4)]);
+  assert.match(ui.elements.get('upload-status').textContent, /up to 5 pilots/);
+});
+
+test('same names with different staff numbers remain separate pilots', async () => {
+  const ui = setup();
+  await ui.add([periodFile(), periodFile({ staff: '654321' })]);
+  assert.equal(ui.elements.get('roster-count').textContent, '2 / 5 loaded');
+});
+
+test('a damaged saved period does not discard another valid period for that pilot', () => {
+  const ui = setup({ currentInputs: { rosters: [{ files: [
+    { fileName: 'nov.txt', text: shortPeriod() }, { fileName: 'bad.txt', text: 'invalid' },
+  ] }] } });
+  assert.equal(ui.elements.get('roster-count').textContent, '1 / 5 loaded');
+  assert.match(ui.elements.get('upload-status').textContent, /could not be read/);
+});
 function roster(index) {
   return { fileName: `webcis-${index}.txt`, text: `webCIS\nName: TEST PILOT ${String.fromCharCode(65 + index)}  Staff No: ${100000 + index}\nBase: SYD\nBid Period 1\nDate: 01 Jan 2026\nDate Duty Detail\n05/01 M A\nEND OF REPORT\n` };
 }

@@ -1,5 +1,5 @@
-import { compareRosterGroup, parseRosterText } from "./roster-browser.js?v=20261115-8";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261115-8";
+import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261115-9";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261115-9";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const THEME_STORAGE_KEY = "roster-compare-theme";
@@ -248,11 +248,6 @@ form.addEventListener("submit", (event) => {
 
 async function addRosterFiles(files) {
   if (isProcessing || !files.length) return;
-  if (loadedRosters.length + files.length > MAX_ROSTERS) {
-    uploadStatus.textContent = `You can load up to ${MAX_ROSTERS} rosters. Remove a loaded roster or choose fewer files.`;
-    fileInput.value = "";
-    return;
-  }
   isProcessing = true;
   fileInput.disabled = true;
   clearStorageButton.disabled = true;
@@ -270,16 +265,15 @@ async function addRosterFiles(files) {
   outcomes.forEach((outcome, index) => {
     if (outcome.status === "rejected") {
       messages.push(`${files[index].name}: ${outcome.reason instanceof Error ? outcome.reason.message : "Could not read this roster."}`);
-    } else if (loadedRosters.some((roster) => roster.text === outcome.value.text)) {
+    } else if (loadedRosters.some((roster) => roster.files.some(file => file.text === outcome.value.text))) {
       messages.push(`${files[index].name}: this roster is already loaded.`);
     } else {
-      const roster = outcome.value;
-      roster.domicile = capitalDomicile(null, roster.parsed.base);
-      roster.parsed.domicile = roster.domicile;
-      roster.parsed.requiresDomicile = !roster.domicile;
-      roster.parsed.colour = CREW_COLOURS.find(colour => !loadedRosters.some(item => item.parsed.colour === colour));
-      loadedRosters.push(roster);
-      added += 1;
+      try {
+        includeRosterFile(outcome.value);
+        added += 1;
+      } catch (error) {
+        messages.push(`${files[index].name}: ${error.message}`);
+      }
     }
   });
   isProcessing = false;
@@ -293,7 +287,24 @@ async function addRosterFiles(files) {
   renderCrewList();
   rerunComparison();
   persistState();
-  uploadStatus.textContent = [`${added} roster${added === 1 ? "" : "s"} added.`, ...messages].join(" ");
+  uploadStatus.textContent = [`${added} roster file${added === 1 ? "" : "s"} added.`, ...messages].join(" ");
+}
+
+function includeRosterFile(file, settings = {}, restoring = false) {
+  const index = findRosterPilotIndex(loadedRosters.map(roster => roster.parsed), file.parsed);
+  const existing = loadedRosters[index];
+  if (!existing && loadedRosters.length >= MAX_ROSTERS) throw new Error(`You can load up to ${MAX_ROSTERS} pilots. Remove a pilot before adding another person.`);
+  const files = existing ? [...existing.files, file] : [file];
+  const parsed = mergeRosterPeriods(files.map(period => period.parsed));
+  const domicile = existing ? existing.domicile : capitalDomicile(settings.domicile, parsed.base);
+  const colour = existing?.parsed.colour || (CREW_COLOURS.includes(settings.colour) ? settings.colour : CREW_COLOURS.find(colour => !loadedRosters.some(item => item.parsed.colour === colour)));
+  parsed.domicile = domicile;
+  parsed.requiresDomicile = !domicile;
+  parsed.colour = colour;
+  const selected = existing ? (restoring ? existing.selected || settings.selected !== false : existing.selected) : settings.selected !== false;
+  const record = { files, fileName: files.map(period => period.fileName).join(" · "), text: files[0].text, parsed, domicile, selected };
+  if (existing) loadedRosters[index] = record;
+  else loadedRosters.push(record);
 }
 
 async function readRosterFile(file) {
@@ -350,7 +361,7 @@ function renderCrewList() {
             <strong>${escapeHtml(name)}</strong>
             <span>${escapeHtml([crew.staffNumber && `Staff ${crew.staffNumber}`, crew.base, crew.bidPeriod && `BP ${crew.bidPeriod}`].filter(Boolean).join(" · ") || "Crew details unavailable")}</span>
             <span>${escapeHtml(crew.coverageStart.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }))} – ${escapeHtml(crew.coverageEnd.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }))}</span>
-            <span class="crew-filename">${escapeHtml(roster.fileName)}</span>
+            <span class="crew-filename">${roster.files.length > 1 ? `${roster.files.length} roster files · ` : ""}${escapeHtml(roster.fileName)}</span>
           </span>
         </label>
         <label class="domicile-control" for="domicile-${index}">Home city / domicile
@@ -538,7 +549,7 @@ function persistState() {
         calendarRange,
         minOverlapMinutes: Number(minOverlapInput.value || 60),
         currentInputs: {
-          rosters: loadedRosters.map(({ fileName, text, selected, domicile, parsed }) => ({ fileName, text, selected, domicile, colour: parsed.colour })),
+          rosters: loadedRosters.map(({ files, fileName, text, selected, domicile, parsed }) => ({ fileName, text, files: files.map(({ fileName, text }) => ({ fileName, text })), selected, domicile, colour: parsed.colour })),
         },
       })
     );
@@ -589,15 +600,13 @@ function restorePersistedState() {
   calendarRangeInput.value = calendarRange;
 
   for (const roster of savedState.currentInputs.rosters) {
-    try {
-      const parsed = parseRosterText(roster.fileName, roster.text);
-      const domicile = capitalDomicile(roster.domicile, parsed.base);
-      parsed.domicile = domicile;
-      parsed.requiresDomicile = !domicile;
-      parsed.colour = CREW_COLOURS.includes(roster.colour) ? roster.colour : CREW_COLOURS.find(colour => !loadedRosters.some(item => item.parsed.colour === colour));
-      loadedRosters.push({ ...roster, domicile, selected: roster.selected !== false, parsed });
-    } catch {
-      uploadStatus.textContent = "Some saved rosters could not be read. Add those files again.";
+    for (const file of Array.isArray(roster.files) ? roster.files : [roster]) {
+      try {
+        if (loadedRosters.some(item => item.files.some(period => period.text === file.text))) continue;
+        includeRosterFile({ ...file, parsed: parseRosterText(file.fileName, file.text) }, roster, true);
+      } catch {
+        uploadStatus.textContent = "Some saved rosters could not be read. Add those files again.";
+      }
     }
   }
   renderCrewList();
@@ -613,7 +622,7 @@ function isPersistedInputs(value) {
     value &&
       Array.isArray(value.rosters) &&
       value.rosters.length <= MAX_ROSTERS &&
-      value.rosters.every((roster) => roster && typeof roster.fileName === "string" && typeof roster.text === "string")
+      value.rosters.every((roster) => roster && (Array.isArray(roster.files) || (typeof roster.fileName === "string" && typeof roster.text === "string")))
   );
 }
 

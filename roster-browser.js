@@ -1,7 +1,7 @@
 // Duty meanings are aligned with Roster Export iCal/public/shared/roster-parser.mjs
 // and roster-analysis.mjs. Recognition never supplies missing clock times.
-const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "RX", "AL", "GL", "HL", "LSL"]);
-const LEAVE_LABELS = { AL: "Annual leave", GL: "Golden leave", HL: "High priority leave", LSL: "Long service leave", LA: "Leave", SL: "Sick leave", UL: "Upline sick leave" };
+const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "RX", "AL", "GL", "HL", "LSL", "LD"]);
+const LEAVE_LABELS = { LD: "Defence leave", AL: "Annual leave", GL: "Golden leave", HL: "High priority leave", LSL: "Long service leave", LA: "Leave", SL: "Sick leave", UL: "Upline sick leave" };
 const EMERGENCY_PORTS = { SY: "SYD", ML: "MEL", BN: "BNE", PH: "PER" };
 const KNOWN_PORTS = new Set(["ADL", "MEL", "SYD", "BNE", "PER", "DRW", "HBA", "CBR", "OOL", "CNS", "AKL", "WLG", "CHC", "SIN", "HKG", "NRT", "HND", "LAX", "LHR", "DFW", "JNB", "SCL", "DPS", "BKK", "NAN", "HTI", "MCY", "TSV", "NTL"]);
 const SHORT_HAUL_OFF_DUTY_CODES = new Set(["D/O", "LA", "AV", "A/V", ...LONG_HAUL_OFF_DUTY_CODES]);
@@ -331,11 +331,79 @@ export function parseRosterText(fileName, rawText) {
     generationDate: extractGenerationDate(text),
   };
 
-  if (isShortHaulRoster(text)) {
-    return parseShortHaulRoster(fileName, text, metadata);
-  }
+  const roster = isShortHaulRoster(text) ? parseShortHaulRoster(fileName, text, metadata) : parseLongHaulRoster(fileName, text, metadata);
+  roster.generatedAt = extractIssueTime(text);
+  return roster;
+}
 
-  return parseLongHaulRoster(fileName, text, metadata);
+// Staff numbers take priority. A name is only a fallback when it identifies
+// one pilot unambiguously and at least one file has no staff number.
+export function findRosterPilotIndex(rosters, candidate) {
+  const staff = String(candidate.staffNumber || "").trim();
+  if (staff) {
+    const exact = rosters.findIndex(roster => String(roster.staffNumber || "").trim() === staff);
+    if (exact >= 0) return exact;
+  }
+  const normalise = name => String(name || "").trim().replace(/\s+/g, " ").toUpperCase();
+  const name = normalise(candidate.crewName);
+  if (!name || name === "UNKNOWN") return -1;
+  const matches = rosters.map((roster, index) => ({ roster, index })).filter(item => normalise(item.roster.crewName) === name);
+  return matches.length === 1 && (!staff || !matches[0].roster.staffNumber) ? matches[0].index : -1;
+}
+
+export function mergeRosterPeriods(periods) {
+  if (!periods.length) throw new Error("No roster periods supplied.");
+  if (periods.length === 1) return periods[0];
+  const staff = new Set(periods.map(period => period.staffNumber).filter(Boolean));
+  if (staff.size > 1) throw new Error("Roster periods belong to different staff numbers.");
+  const owners = new Map();
+  const key = date => formatSortableLocalDate(date);
+  // A revised file replaces complete dates, including every duty on that date.
+  // Reliable printed issue times win; otherwise the latest import wins.
+  periods.forEach((period, index) => period.calendar.forEach(entry => {
+    const previous = owners.get(key(entry.date));
+    const previousTime = previous == null ? null : periods[previous].generatedAt;
+    if (previous == null || !previousTime || !period.generatedAt || period.generatedAt >= previousTime) owners.set(key(entry.date), index);
+  }));
+  const owned = (date, index) => owners.get(key(date)) === index;
+  const clip = (window, index) => {
+    const pieces = [];
+    for (let day = new Date(window.start.getFullYear(), window.start.getMonth(), window.start.getDate()); day < window.end; day = addDays(day, 1)) {
+      if (!owned(day, index)) continue;
+      const start = new Date(Math.max(+day, +window.start));
+      const end = new Date(Math.min(+addDays(day, 1), +window.end));
+      const previous = pieces.at(-1);
+      if (previous && +previous.end === +start) previous.end = end;
+      else if (end > start) pieces.push({ ...window, start, end, sourcePeriod: index, rosterBase: periods[index].base });
+    }
+    return pieces;
+  };
+  const calendar = periods.flatMap((period, index) => period.calendar.filter(entry => owned(entry.date, index)).map(entry => ({ ...entry, sourcePeriod: index }))).sort((a, b) => a.date - b.date);
+  const newest = periods.reduce((best, period) => best.generatedAt && period.generatedAt && best.generatedAt > period.generatedAt ? best : period);
+  const merged = { ...newest, staffNumber: [...staff][0] || null, calendar,
+    fileName: periods.map(period => period.fileName).join(" · "),
+    bidPeriod: [...new Set(periods.map(period => period.bidPeriod).filter(Boolean))].join(" / "),
+    coverageStart: calendar[0].date, coverageEnd: calendar.at(-1).date,
+    offDays: periods.flatMap((period, index) => period.offDays.filter(entry => owned(entry.date, index)).map(entry => ({ ...entry, homeWindows: offDayWindows(entry).flatMap(window => clip(window, index)) }))),
+    reserveDays: periods.flatMap((period, index) => period.reserveDays.filter(entry => owned(entry.date, index))),
+    unresolvedDuties: periods.flatMap((period, index) => period.unresolvedDuties.filter(entry => owned(entry.date, index))),
+    trips: periods.flatMap((period, index) => period.trips.map(trip => ({ ...trip, legs: trip.legs.filter(leg => {
+      if (owned(leg.departureDateTime, index) || owned(leg.arrivalDateTime, index)) return true;
+      return clip({ start: leg.departureDateTime, end: leg.arrivalDateTime }, index).length > 0;
+    }).map(leg => ({ ...leg, sourcePeriod: index })) })).filter(trip => trip.legs.length)),
+  };
+  for (const property of ["portWindows", "homeBoundaryWindows", "dutyBlocks"]) merged[property] = periods.flatMap((period, index) => (period[property] || []).flatMap(window => clip(window, index)));
+  return merged;
+}
+
+function extractIssueTime(text) {
+  const compact = text.match(/\b(\d{2}[A-Z][a-z]{2}\d{2})\s+(\d{2})(\d{2})\b/);
+  const spaced = text.match(/\b(\d{2}\s+[A-Z][a-z]{2}\s+\d{4})\s+(\d{2}):(\d{2})\b/);
+  const match = compact || spaced;
+  if (!match) return null;
+  const date = compact ? parseCompactDayMonthYearText(match[1]) : parseDayMonthYearText(match[1]);
+  date.setHours(Number(match[2]), Number(match[3]), 0, 0);
+  return date;
 }
 
 function parseLongHaulRoster(fileName, text, metadata) {
@@ -559,7 +627,7 @@ function buildHomeBoundaryWindows(roster) {
 function boundaryHomeWindows(roster) {
   const port = homePort(roster);
   if (!port) return [];
-  return (roster.homeBoundaryWindows || []).filter(window => window.anchorPorts.every(anchor => anchor === roster.base || anchor === port)).map(window => ({
+  return (roster.homeBoundaryWindows || []).filter(window => window.anchorPorts.every(anchor => anchor === (window.rosterBase || roster.base) || anchor === port)).map(window => ({
     ...window, port, assumed: true, dutyCode: `${window.dutyCode} (${port})`,
   }));
 }
