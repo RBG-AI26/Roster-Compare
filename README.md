@@ -60,6 +60,8 @@ Click a pilot's start/finish-day bar to see its home-availability intervals. The
 
 ## Non-flying duties
 
+Short-haul `EP` followed by digits (for example `EP29`) is EPC emergency-procedures training. Pattern-detail `C` course rows are parsed alongside PAX sectors. A matching same-port course sector supplies its location and printed port-local times, including when calendar clocks are in roster-base time. Without a course sector, enclosing inbound/outbound PAX sectors in the same pattern can establish the training port when they agree. A base or domicile alone does not establish an EPC location. EPC time is on duty and is removed from free layover windows.
+
 Duty recognition follows the sibling **Roster Export iCal** app's `public/shared/roster-parser.mjs`, `public/shared/roster-analysis.mjs` and smoke fixtures:
 
 | Roster code | Treatment |

@@ -191,6 +191,7 @@ function classifyNonFlyingDuty(entry, shortHaul = entry.rosterType === "short-ha
   if (["A", "X", "RX", "D/O", "A/V"].includes(code)) return { kind: "off", label: `${code} · day off`, assumeHome: true };
   if (shortHaul && code === "AV") return { kind: "off", label: "AV · day off", assumeHome: true };
   if (shortHaul && code === "MS") return { kind: "base_duty", label: "MS · duty at base" };
+  if (shortHaul && /^EP\d+$/.test(code)) return { kind: "training", label: `EPC · emergency procedures (${code})`, shortHaulEpc: true };
   if (LEAVE_LABELS[code]) return { kind: "leave", label: `${code} · ${LEAVE_LABELS[code]}`, assumeHome: !["SL", "UL"].includes(code) };
   if (SHORT_HAUL_RESERVE_DUTY_REGEX.test(code)) return { kind: "reserve", label: code === "SR" ? "SR · standby" : `${code} · reserve` };
   if (code === "TSPD") return { kind: "training", label: "TSPD", rulePort: "MEL", ruleSource: "Roster Export TSPD Melbourne rule" };
@@ -265,6 +266,10 @@ function resolveNonFlyingDuties(calendar, patterns, trips, base) {
     if (/^[A-Z]{3}$/.test(entry.port || "") && !["UNK", "NIL"].includes(entry.port)) { port = entry.port; locationSource = "Roster port column"; }
     if (!port && matchingLegs.length && new Set(matchingLegs.map(leg => leg.origin)).size === 1) { port = matchingLegs[0].origin; locationSource = "Matched same-port simulator / ground sector"; }
     if (!port && definitionPorts.size === 1) { port = [...definitionPorts][0]; locationSource = "Same-port pattern definition"; }
+    if (!port && info.shortHaulEpc) {
+      const coursePort = shortHaulCoursePort(entry, trips);
+      if (coursePort) { port = coursePort; locationSource = "Enclosing PAX sectors and overnight port in the same pattern"; }
+    }
     if (!port && info.rulePort) { port = info.rulePort; locationSource = info.ruleSource; }
     if (!port) {
       const mentioned = [...new Set(String(entry.detail || "").toUpperCase().match(/\b[A-Z]{3}\b/g) || [])].filter(token => knownPorts.has(token));
@@ -278,6 +283,13 @@ function resolveNonFlyingDuties(calendar, patterns, trips, base) {
     if (!port && info.kind === "reserve" && base) { port = base; locationSource = "Roster base for reserve / standby"; }
     if (info.kind === "base_duty") { port = base || null; locationSource = base ? "Roster base for MS duty" : null; }
     let window = dutyTimeWindow(entry);
+    // Short-haul calendar clocks can be in roster-base time. An explicitly
+    // located EPC sector supplies the course's printed port-local times.
+    if (info.shortHaulEpc && matchingLegs.length) window = {
+      start: new Date(Math.min(...matchingLegs.map(leg => leg.departureDateTime))),
+      end: new Date(Math.max(...matchingLegs.map(leg => leg.arrivalDateTime))),
+      source: "Matched EPC course-sector times (port local)",
+    };
     if (!matchingLegs.length && matchingDefinition?.flights?.length && definitionPorts.size === 1) matchingLegs = instantiatePattern(entry.date, matchingDefinition).map(leg => ({ ...leg.flight, departureDateTime: leg.departureDateTime, arrivalDateTime: leg.arrivalDateTime })).filter(leg => formatSortableLocalDate(leg.departureDateTime) === formatSortableLocalDate(entry.date));
     if (!window && matchingLegs.length) window = { start: matchingLegs[0].departureDateTime, end: matchingLegs.at(-1).arrivalDateTime, source: "Matched ground-sector times" };
     const issues = [];
@@ -288,6 +300,19 @@ function resolveNonFlyingDuties(calendar, patterns, trips, base) {
     if (port && window) portWindows.push({ start: window.start, end: window.end, port, dutyCode: `${info.label} (${info.kind === "reserve" ? "on call" : "on duty"})`, matchType: info.kind === "reserve" ? "home_reserve" : "ground_duty", onDuty: info.kind !== "reserve", dutyLabel: info.label });
   }
   return { portWindows, unresolvedDuties };
+}
+
+function shortHaulCoursePort(entry, trips) {
+  const window = dutyTimeWindow(entry);
+  if (!window) return null;
+  const ports = new Set();
+  for (const trip of trips) {
+    const pax = trip.legs.filter(leg => leg.marker === "P" && leg.origin !== leg.destination);
+    const inbound = pax.filter(leg => leg.arrivalDateTime <= window.start).sort((a, b) => b.arrivalDateTime - a.arrivalDateTime)[0];
+    const outbound = pax.filter(leg => leg.departureDateTime >= window.end).sort((a, b) => a.departureDateTime - b.departureDateTime)[0];
+    if (inbound && outbound && inbound.destination === outbound.origin) ports.add(inbound.destination);
+  }
+  return ports.size === 1 ? [...ports][0] : null;
 }
 
 function excludeGroundDutyFromLayovers(windows) {
@@ -759,7 +784,7 @@ function parseShortHaulDetailBlock(code, blockDate, lines) {
 
 function parseShortHaulLegLine(line, blockDate, previousDate) {
   const match = line.match(
-    /^(?<date>\d{2}[A-Z][a-z]{2})\s+(?:(?<marker>[P&])\s+)?(?<service>\S+)\s+(?<origin>[A-Z]{3})\s+(?<departure>\d{4})\s+(?<destination>[A-Z]{3})\s+(?<arrival>\d{4})/
+    /^(?<date>\d{2}[A-Z][a-z]{2})\s+(?:(?<marker>[PC&])\s+)?(?<service>\S+)\s+(?<origin>[A-Z]{3})\s+(?<departure>\d{4})\s+(?<destination>[A-Z]{3})\s+(?<arrival>\d{4})/
   );
   if (!match || !match.groups) {
     return null;
@@ -775,6 +800,7 @@ function parseShortHaulLegLine(line, blockDate, previousDate) {
   return {
     flightDate,
     service: match.groups.service,
+    marker: match.groups.marker || null,
     origin: match.groups.origin,
     destination: match.groups.destination,
     departureDateTime,
@@ -1458,9 +1484,6 @@ function buildNotes(rosterA, rosterB) {
   if (rosterB.unresolvedDuties.length) {
     notes.push(`${rosterB.crewName}: ${rosterB.unresolvedDuties.length} duty entries were treated as uncertain.`);
   }
-  if (homePort(rosterA) !== homePort(rosterB)) {
-    notes.push(`Domiciles differ (${homePort(rosterA) || "?"} vs ${homePort(rosterB) || "?"}), so shared days off may not mean the same physical port.`);
-  }
   const overlapStart = Math.max(rosterA.coverageStart?.getTime() || 0, rosterB.coverageStart?.getTime() || 0);
   const overlapEnd = Math.min(rosterA.coverageEnd?.getTime() || 0, rosterB.coverageEnd?.getTime() || 0);
   if (rosterA.coverageStart && rosterA.coverageEnd && rosterB.coverageStart && rosterB.coverageEnd) {
@@ -1493,11 +1516,6 @@ function buildGroupNotes(rosters) {
     if (roster.unresolvedDuties.length) {
       notes.push(`${roster.crewName}: ${roster.unresolvedDuties.length} duty entries were treated as uncertain.`);
     }
-  }
-
-  const bases = rosters.map((roster) => homePort(roster) || "?");
-  if (new Set(bases).size > 1) {
-    notes.push(`Domiciles differ (${bases.join(" vs ")}), so shared home-based availability may not mean the same physical port.`);
   }
 
   const overlapStart = Math.max(...rosters.map((roster) => roster.coverageStart?.getTime() || 0));
