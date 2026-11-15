@@ -14,7 +14,7 @@ Browser-only web app for loading roster text files for up to five pilots and com
 - Works directly in desktop browsers plus Safari on iPhone and iPad
 - Installable PWA with an offline app shell
 - Saves loaded rosters, crew selection, filter and threshold locally on the device; restores existing two/three-roster saves
-- Compares shared days off: `A`, `X`, `RX`, `AL`, `GL`, `HL`, `LSL`, `LD` (plus short-haul `D/O`, `LA`, `AV`, `A/V`)
+- Compares shared days off: `A`, `X`, `RX`, `BL`, `AL`, `GL`, `HL`, `LSL`, `LD` (plus short-haul `D/O`, `LA`, `AV`, `A/V`)
 - Compares same-port shared time using a configurable minutes-in-port threshold
 - Includes partial days before duty report and after release, with the exact overlap times
 - Marks unresolved duties as uncertain
@@ -67,6 +67,7 @@ Duty recognition follows the sibling **Roster Export iCal** app's `public/shared
 | Roster code | Treatment |
 | --- | --- |
 | `RX` | X-style day off at the selected domicile |
+| `BL` | Day off at the selected domicile |
 | Short-haul `AV`, `A/V` | Full day off at the selected domicile |
 | Short-haul `MS` | Duty at the roster base, using printed report/end times; distinct from a day off or reserve |
 | `EPA` / `EPC` | Emergency procedures; `SY` → SYD, `ML` → MEL, `BN` → BNE, `PH` → PER |

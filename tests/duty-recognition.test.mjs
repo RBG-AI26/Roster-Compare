@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { shortPeriod } from './fixtures/short-period.mjs';
 const fromFile = async file => import('data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../' + file, import.meta.url), 'utf8')).toString('base64'));
 const { parseRosterText, compareRosterGroup } = await fromFile('roster-browser.js');
 const { buildRosterCalendar, sharedCalendarWindows } = await fromFile('roster-calendar.js');
@@ -8,6 +9,27 @@ const parse = (rows, patterns = '', base = 'ADL') => parseRosterText('arms.txt',
 const model = roster => buildRosterCalendar([roster, roster], new Date(2026, 4, 1));
 const cells = roster => model(roster).weeks.flatMap(week => week.rows[0]);
 // Synthetic examples mirror Roster Export iCal's parser/analysis rules and smoke fixtures.
+test('BL is a day off at domicile in short-haul and long-haul rosters', () => {
+  const short = parseRosterText('short.txt', shortPeriod({ start: new Date(2026, 10, 30), duty: index => index === 11 ? 'BL' : 'D/O' }));
+  const long = parseRosterText('arms.txt', 'ARMS\nName: TEST PILOT Staff No: 123456\nBase: MEL\nDate: 14 Nov 2026\nDate Duty Detail\n11/12 F BL\nEND OF REPORT\n');
+  for (const roster of [short, long]) {
+    roster.domicile = 'ADL';
+    const entry = roster.calendar.find(row => row.dutyCode === 'BL');
+    assert.equal(entry.dutyInfo.label, 'BL · day off');
+    assert.equal(entry.dutyInfo.assumeHome, true);
+    assert.equal(roster.unresolvedDuties.length, 0);
+    assert.ok(roster.offDays.some(row => row.dutyCode === 'BL'));
+    assert.equal(roster.reserveDays.length, 0);
+    const model = buildRosterCalendar([roster], new Date(2026, 11, 1), { range: 'roster' });
+    const cell = model.weeks.flatMap(week => week.rows[0]).find(cell => cell.detail.startsWith('BL · day off'));
+    assert.equal(cell.label, 'ADL · home');
+    assert.equal(cell.kind, 'home');
+    const windows = sharedCalendarWindows([roster, roster]);
+    assert.ok(windows.some(window => window.port === 'ADL' && window.start <= entry.date && window.end > entry.date && !window.onDuty && !window.reserve));
+    assert.ok(compareRosterGroup([roster, roster]).matches.some(match => match.sort_date === '2026-12-11' && match.match_key === 'shared_day_off'));
+  }
+});
+
 test('RX is a day off, never reserve, and HL is recognised leave', () => {
   const roster = parse('21/05 T RX\n22/05 F HL');
   roster.domicile = 'PER';

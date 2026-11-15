@@ -1,6 +1,6 @@
 // Duty meanings are aligned with Roster Export iCal/public/shared/roster-parser.mjs
 // and roster-analysis.mjs. Recognition never supplies missing clock times.
-const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "RX", "AL", "GL", "HL", "LSL", "LD"]);
+const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "RX", "BL", "AL", "GL", "HL", "LSL", "LD"]);
 const LEAVE_LABELS = { LD: "Defence leave", AL: "Annual leave", GL: "Golden leave", HL: "High priority leave", LSL: "Long service leave", LA: "Leave", SL: "Sick leave", UL: "Upline sick leave" };
 const EMERGENCY_PORTS = { SY: "SYD", ML: "MEL", BN: "BNE", PH: "PER" };
 const KNOWN_PORTS = new Set(["ADL", "MEL", "SYD", "BNE", "PER", "DRW", "HBA", "CBR", "OOL", "CNS", "AKL", "WLG", "CHC", "SIN", "HKG", "NRT", "HND", "LAX", "LHR", "DFW", "JNB", "SCL", "DPS", "BKK", "NAN", "HTI", "MCY", "TSV", "NTL"]);
@@ -188,7 +188,7 @@ function compareGroupPortMatches(rosters, portMatchWindowMs) {
 function classifyNonFlyingDuty(entry, shortHaul = entry.rosterType === "short-haul") {
   const code = String(entry.dutyCode || "").replace(/\(T\)$/i, "").trim().toUpperCase();
   const text = `${code} ${entry.detail || ""} ${entry.service || ""}`.toUpperCase();
-  if (["A", "X", "RX", "D/O", "A/V"].includes(code)) return { kind: "off", label: `${code} · day off`, assumeHome: true };
+  if (["A", "X", "RX", "BL", "D/O", "A/V"].includes(code)) return { kind: "off", label: `${code} · day off`, assumeHome: true };
   if (shortHaul && code === "AV") return { kind: "off", label: "AV · day off", assumeHome: true };
   if (shortHaul && code === "MS") return { kind: "base_duty", label: "MS · duty at base" };
   if (shortHaul && /^EP\d+$/.test(code)) return { kind: "training", label: `EPC · emergency procedures (${code})`, shortHaulEpc: true };
