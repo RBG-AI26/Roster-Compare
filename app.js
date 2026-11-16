@@ -1,5 +1,6 @@
-import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261115-12";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261115-12";
+import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261116-email1";
+import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261116-email1";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261116-email1";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const THEME_STORAGE_KEY = "roster-compare-theme";
@@ -26,6 +27,14 @@ const rosterCount = document.getElementById("roster-count");
 const selectionCount = document.getElementById("selection-count");
 const uploadStatus = document.getElementById("upload-status");
 const MAX_ROSTERS = 5;
+const emailCodeInput = document.getElementById("email-connection-code");
+const emailConnectButton = document.getElementById("email-connect-button");
+const emailRefreshButton = document.getElementById("email-refresh-button");
+const emailConnectionList = document.getElementById("email-connections");
+const emailStatus = document.getElementById("email-status");
+let emailConnections = [];
+let emailBusy = false;
+
 const calendarGrid = document.getElementById("calendar-grid");
 const calendarTitle = document.getElementById("calendar-month");
 const calendarLegend = document.getElementById("calendar-crew-legend");
@@ -164,7 +173,7 @@ for (const eventName of ["dragleave", "drop"]) {
 dropzone.addEventListener("drop", (event) => addRosterFiles(Array.from(event.dataTransfer.files)));
 
 crewList.addEventListener("change", (event) => {
-  if (isProcessing) return;
+  if (isProcessing || emailBusy) return;
   const domicileInput = event.target.closest("[data-domicile-index]");
   if (domicileInput) {
     const roster = loadedRosters[Number(domicileInput.dataset.domicileIndex)];
@@ -180,14 +189,16 @@ crewList.addEventListener("change", (event) => {
     return;
   }
   const input = event.target.closest("[data-roster-index]");
-  if (!input || isProcessing) return;
+  if (!input || isProcessing || emailBusy) return;
   loadedRosters[Number(input.dataset.rosterIndex)].selected = input.checked;
   updateSelection();
 });
 crewList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-remove-index]");
-  if (!button || isProcessing) return;
-  loadedRosters.splice(Number(button.dataset.removeIndex), 1);
+  if (!button || isProcessing || emailBusy) return;
+  const removed = loadedRosters.splice(Number(button.dataset.removeIndex), 1)[0];
+  emailConnections = emailConnections.filter(connection => connection.staffNumber !== removed?.parsed.staffNumber);
+  renderEmailConnections();
   comparisonCache.clear();
   prepareComparisons();
   renderCrewList();
@@ -224,9 +235,13 @@ installButton.addEventListener("click", async () => {
 });
 
 clearStorageButton.addEventListener("click", () => {
-  if (isProcessing) return;
+  if (isProcessing || emailBusy) return;
   clearPersistedState();
   loadedRosters = [];
+  emailConnections = [];
+  emailCodeInput.value = "";
+  emailStatus.textContent = "";
+  renderEmailConnections();
   comparisonCache.clear();
   activeFilter = "all";
   calendarMonth = null;
@@ -247,7 +262,7 @@ form.addEventListener("submit", (event) => {
 });
 
 async function addRosterFiles(files) {
-  if (isProcessing || !files.length) return;
+  if (isProcessing || emailBusy || !files.length) return;
   isProcessing = true;
   fileInput.disabled = true;
   clearStorageButton.disabled = true;
@@ -290,11 +305,11 @@ async function addRosterFiles(files) {
   uploadStatus.textContent = [`${added} roster file${added === 1 ? "" : "s"} added.`, ...messages].join(" ");
 }
 
-function includeRosterFile(file, settings = {}, restoring = false) {
+function includeRosterFile(file, settings = {}, restoring = false, replacingFiles = null) {
   const index = findRosterPilotIndex(loadedRosters.map(roster => roster.parsed), file.parsed);
   const existing = loadedRosters[index];
   if (!existing && loadedRosters.length >= MAX_ROSTERS) throw new Error(`You can load up to ${MAX_ROSTERS} pilots. Remove a pilot before adding another person.`);
-  const files = existing ? [...existing.files, file] : [file];
+  const files = replacingFiles || (existing ? [...existing.files, file] : [file]);
   const parsed = mergeRosterPeriods(files.map(period => period.parsed));
   const domicile = existing ? existing.domicile : capitalDomicile(settings.domicile, parsed.base);
   const colour = existing?.parsed.colour || (CREW_COLOURS.includes(settings.colour) ? settings.colour : CREW_COLOURS.find(colour => !loadedRosters.some(item => item.parsed.colour === colour)));
@@ -356,7 +371,7 @@ function renderCrewList() {
     return `
       <div class="crew-row" style="--crew-colour: ${crew.colour}">
         <div class="crew-profile"><label class="crew-choice">
-          <input type="checkbox" data-roster-index="${index}" ${roster.selected ? "checked" : ""} ${isProcessing ? "disabled" : ""} />
+          <input type="checkbox" data-roster-index="${index}" ${roster.selected ? "checked" : ""} ${isProcessing || emailBusy ? "disabled" : ""} />
           <span class="crew-details">
             <strong>${escapeHtml(name)}</strong>
             <span>${escapeHtml([crew.staffNumber && `Staff ${crew.staffNumber}`, crew.base, crew.bidPeriod && `BP ${crew.bidPeriod}`].filter(Boolean).join(" · ") || "Crew details unavailable")}</span>
@@ -365,10 +380,10 @@ function renderCrewList() {
           </span>
         </label>
         <label class="domicile-control" for="domicile-${index}">Home city / domicile
-          <select id="domicile-${index}" data-domicile-index="${index}" aria-describedby="domicile-help-${index}" ${isProcessing ? "disabled" : ""}>${domicileOptions(crew)}</select>
+          <select id="domicile-${index}" data-domicile-index="${index}" aria-describedby="domicile-help-${index}" ${isProcessing || emailBusy ? "disabled" : ""}>${domicileOptions(crew)}</select>
         </label>
         <p id="domicile-help-${index}" class="domicile-help">Days off: ${escapeHtml(crew.domicile ? crew.domicile : "choose a capital city")}. Roster base: ${escapeHtml(crew.base || "unknown")}.</p></div>
-        <button type="button" class="secondary-button remove-roster" data-remove-index="${index}" aria-label="Remove ${escapeHtml(name)}" ${isProcessing ? "disabled" : ""}>Remove</button>
+        <button type="button" class="secondary-button remove-roster" data-remove-index="${index}" aria-label="Remove ${escapeHtml(name)}" ${isProcessing || emailBusy ? "disabled" : ""}>Remove</button>
       </div>`;
   }).join("") : '<p class="empty-state">Your crew will appear here after you add rosters.</p>';
 }
@@ -548,8 +563,9 @@ function persistState() {
         calendarMonth: calendarMonth ? dateKey(calendarMonth) : null,
         calendarRange,
         minOverlapMinutes: Number(minOverlapInput.value || 60),
+        emailConnections: emailConnections.map(({ code, staffNumber, name, checkedAtUtc, updatedAtUtc }) => ({ code, staffNumber, name, checkedAtUtc, updatedAtUtc })),
         currentInputs: {
-          rosters: loadedRosters.map(({ files, fileName, text, selected, domicile, parsed }) => ({ fileName, text, files: files.map(({ fileName, text }) => ({ fileName, text })), selected, domicile, colour: parsed.colour })),
+          rosters: loadedRosters.map(({ files, fileName, text, selected, domicile, parsed }) => ({ fileName, text, files: files.map(({ fileName, text, emailSource }) => ({ fileName, text, ...(emailSource ? { emailSource } : {}) })), selected, domicile, colour: parsed.colour })),
         },
       })
     );
@@ -572,6 +588,10 @@ function restorePersistedState() {
     return;
   }
 
+  emailConnections = Array.isArray(savedState.emailConnections) ? savedState.emailConnections.slice(0, MAX_ROSTERS).filter(connection => {
+    try { connectionToken(connection.code); return /^\d{4,}$/.test(connection.staffNumber || ""); } catch { return false; }
+  }) : [];
+  renderEmailConnections();
   const minOverlapMinutes =
     savedState.minOverlapMinutes != null
       ? Number(savedState.minOverlapMinutes)
@@ -654,3 +674,108 @@ themeToggle.addEventListener("click", () => applyTheme(document.documentElement.
 renderCrewList();
 updateActiveFilterButton();
 restorePersistedState();
+renderEmailConnections();
+// One check on opening; no background polling while the app is closed.
+if (emailConnections.length) refreshEmailConnections();
+
+
+function renderEmailConnections() {
+  fileInput.disabled = emailBusy || isProcessing;
+  clearStorageButton.disabled = emailBusy || isProcessing;
+  emailRefreshButton.disabled = emailBusy || isProcessing || !emailConnections.length;
+  emailConnectButton.disabled = emailBusy || isProcessing;
+  emailCodeInput.disabled = emailBusy || isProcessing;
+  emailConnectionList.innerHTML = emailConnections.map((connection, index) => `
+    <div class="email-connection">
+      <div><strong>${escapeHtml(connection.name || `Staff ${connection.staffNumber}`)}</strong>
+      <span>${escapeHtml(connection.error || (connection.checkedAtUtc ? `Last checked ${new Date(connection.checkedAtUtc).toLocaleString("en-GB")}` : "Waiting for first refresh"))}</span>
+      <span>${escapeHtml(connection.updatedAtUtc ? `Roster updated ${new Date(connection.updatedAtUtc).toLocaleString("en-GB")}` : "No emailed roster loaded yet")}</span></div>
+      <button type="button" class="secondary-button" data-disconnect-email="${index}" ${emailBusy || isProcessing ? "disabled" : ""}>Disconnect</button>
+    </div>`).join("");
+}
+
+function applyEmailRosterData(data) {
+  if (!data.changed.length) return 0;
+  const candidate = parseRosterText(data.changed[0].fileName, data.changed[0].rosterText);
+  const existing = loadedRosters[findRosterPilotIndex(loadedRosters.map(roster => roster.parsed), candidate)];
+  const files = prepareEmailFiles(data, existing?.files || [], parseRosterText);
+  // includeRosterFile merges once, retaining the crew's domicile, colour and selection.
+  includeRosterFile(files.at(-1), {}, false, files);
+  return data.changed.length;
+}
+
+async function connectEmailRoster() {
+  if (emailBusy || isProcessing) return;
+  emailBusy = true;
+  renderEmailConnections();
+  emailStatus.textContent = "Connecting to emailed roster…";
+  try {
+    const code = `roster-overlap:${connectionToken(emailCodeInput.value)}`;
+    const already = emailConnections.find(connection => connection.code === code);
+    if (already) throw new Error("This roster is already connected. Use Refresh emailed rosters to check it.");
+    const candidate = { code };
+    const data = await fetchEmailRosters(candidate);
+    const existing = emailConnections.find(connection => connection.staffNumber === data.staffNumber);
+    if (!existing && emailConnections.length >= MAX_ROSTERS) throw new Error("You can connect up to five pilots. Disconnect one before adding another.");
+    const people = new Set([...loadedRosters.map((roster, index) => roster.parsed.staffNumber || `manual-${index}`), ...emailConnections.map(connection => connection.staffNumber)]);
+    if (!people.has(data.staffNumber) && people.size >= MAX_ROSTERS) throw new Error("You can load up to 5 pilots. Remove or disconnect a pilot before connecting another.");
+    applyEmailRosterData(data);
+    const connection = { code, staffNumber: data.staffNumber, name: data.name, checkedAtUtc: data.checkedAtUtc,
+      updatedAtUtc: data.periods.map(period => period.storedAtUtc).sort().at(-1) || "" };
+    if (existing) emailConnections[emailConnections.indexOf(existing)] = connection;
+    else emailConnections.push(connection);
+    emailCodeInput.value = "";
+    emailStatus.textContent = data.message || (data.unavailable.length ? "Connected. Some periods are still becoming available; refresh shortly." : "Connected. Emailed rosters will refresh when you open the app.");
+    emailRostersChanged();
+  } catch (error) { emailStatus.textContent = error.message || "Could not connect to the roster service."; }
+  finally { emailBusy = false; renderEmailConnections(); }
+}
+
+async function refreshEmailConnections() {
+  if (emailBusy || isProcessing || !emailConnections.length) return;
+  emailBusy = true;
+  renderEmailConnections();
+  emailStatus.textContent = "Checking emailed rosters…";
+  let changed = 0;
+  const messages = [];
+  for (const connection of emailConnections) {
+    try {
+      const data = await fetchEmailRosters(connection, knownEmailPeriods(loadedRosters, connection.staffNumber));
+      changed += applyEmailRosterData(data);
+      connection.name = data.name;
+      connection.checkedAtUtc = data.checkedAtUtc;
+      connection.updatedAtUtc = data.periods.map(period => period.storedAtUtc).sort().at(-1) || connection.updatedAtUtc || "";
+      connection.error = data.unavailable.length ? "Some periods are still becoming available; refresh shortly." : data.message || "";
+      if (connection.error) messages.push(`${connection.name || connection.staffNumber}: ${connection.error}`);
+    } catch (error) {
+      connection.error = error.message || "Could not refresh. Last saved roster retained.";
+      messages.push(`${connection.name || connection.staffNumber}: ${connection.error}`);
+    }
+  }
+  emailRostersChanged();
+  emailBusy = false;
+  renderEmailConnections();
+  emailStatus.textContent = [`${changed} roster period${changed === 1 ? "" : "s"} updated.`, ...messages].join(" ");
+}
+
+function emailRostersChanged() {
+  comparisonCache.clear();
+  prepareComparisons();
+  renderCrewList();
+  rerunComparison();
+  persistState();
+}
+
+emailConnectButton.addEventListener("click", connectEmailRoster);
+emailCodeInput.addEventListener("keydown", event => {
+  if (event.key === "Enter") { event.preventDefault(); connectEmailRoster(); }
+});
+emailRefreshButton.addEventListener("click", refreshEmailConnections);
+emailConnectionList.addEventListener("click", event => {
+  const button = event.target.closest("[data-disconnect-email]");
+  if (!button || emailBusy || isProcessing) return;
+  emailConnections.splice(Number(button.dataset.disconnectEmail), 1);
+  renderEmailConnections();
+  persistState();
+  emailStatus.textContent = "Disconnected. Downloaded rosters remain on this device; use Remove or Clear saved data to delete them.";
+});

@@ -601,3 +601,9 @@ button:disabled { opacity: .4; }
 .uncertain-reason { display: block; margin-top: 4px; color: var(--muted); line-height: 1.5; }
 .roster-calendar .calendar-ground { background: var(--ground-bg); color: var(--ground-text); }
 .roster-calendar .calendar-leave { color: var(--leave-text); }
+
+.email-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: .8rem; }
+#email-connection-code { display: block; width: 100%; margin-top: .4rem; padding: .7rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel); color: inherit; font: inherit; }
+.email-connection { display: flex; align-items: center; justify-content: space-between; gap: .8rem; border-top: 1px solid var(--line); padding: .85rem 0; }
+.email-connection span { display: block; font-size: .8rem; margin-top: .25rem; }
+.email-connection button { flex-shrink: 0; }

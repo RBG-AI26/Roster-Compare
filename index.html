@@ -2,6 +2,7 @@
 <html lang="en-GB" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
+    <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
@@ -24,7 +25,7 @@
         }
       } catch { /* Use the default theme if storage is unavailable. */ }
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20261115-12" />
+    <link rel="stylesheet" href="./styles.css?v=20261116-email1" />
   </head>
   <body>
     <main class="shell">
@@ -49,6 +50,20 @@
           </label>
           <p id="upload-help" class="panel-copy">Files are processed and saved on this device.</p>
           <p id="upload-status" class="status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="panel" aria-labelledby="email-heading">
+          <div class="panel-heading"><h2 id="email-heading">Emailed rosters</h2></div>
+          <p class="panel-copy">Connect a pilot's emailed roster using their private Overlap code. Only connect rosters you have permission to view.</p>
+          <label for="email-connection-code">Private connection code</label>
+          <input id="email-connection-code" type="password" autocomplete="off" spellcheck="false" placeholder="Paste roster-overlap:…" />
+          <div class="email-actions">
+            <button id="email-connect-button" type="button" class="secondary-button">Connect emailed roster</button>
+            <button id="email-refresh-button" type="button" class="secondary-button" disabled>Refresh emailed rosters</button>
+          </div>
+          <p class="panel-copy">Checks for changes when you open the app. Connections and downloaded rosters are saved on this device. Keep connection codes private.</p>
+          <div id="email-connections"></div>
+          <p id="email-status" class="status" role="status" aria-live="polite"></p>
         </section>
 
         <section class="panel crew-panel" aria-labelledby="crew-heading">
@@ -128,6 +143,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js?v=20261115-12"></script>
+    <script type="module" src="./app.js?v=20261116-email1"></script>
   </body>
 </html>
