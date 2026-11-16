@@ -1,1 +1,18 @@
 .DS_Store
+
+# Private roster inputs, calendar exports, local state and credentials
+*.txt
+*.ics
+*.eml
+*.msg
+rosters/
+uploads/
+private/
+.wrangler/
+.dev.vars*
+.env*
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+node_modules/
