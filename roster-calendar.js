@@ -253,7 +253,8 @@ export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60, ra
 function escapeHtml(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
-export function renderCalendarMarkup(model) {
+export function renderCalendarMarkup(model, now = new Date()) {
+  const today = dateKey(now);
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const placement = bar => `grid-column: ${bar.column + 2} / span ${bar.span}`;
   const button = (bar, classes, style = '') => `<div class="calendar-cell" role="cell" aria-colindex="${bar.column + 2}" aria-colspan="${bar.span}" style="${placement(bar)};${style}"><button type="button" class="calendar-bar ${classes}" data-calendar-detail="${bar.detailId}" aria-label="${escapeHtml(`${model.details[bar.detailId].title} · ${model.details[bar.detailId].subtitle} · ${bar.label}`)}" title="${escapeHtml(bar.label)}">${escapeHtml(bar.label)}</button></div>`;
@@ -266,10 +267,13 @@ export function renderCalendarMarkup(model) {
     return `<button type="button" class="calendar-bar ${classes}" data-calendar-detail="${segment.detailId}" style="left: ${segment.offset}%; width: ${segment.width}%" aria-label="${escapeHtml(`${segment.participantLabel} · ${status} · ${detail.subtitle}`)}" title="${escapeHtml(`${segment.participantLabel} · ${status} · ${detail.subtitle}`)}"><span>${escapeHtml(segment.label)}</span></button>`;
   }).join('')}</div></div>`).join('')}</div>`).join('')}</div>`;
   };
-  return `<div class="calendar-lane calendar-day-head" role="row"><span role="columnheader">Pilots / overlaps</span>${days.map(day => `<span role="columnheader">${day}</span>`).join('')}</div>` + model.weeks.map((week, weekIndex) => `
-    <div class="calendar-week" role="rowgroup">
-      <div class="calendar-lane calendar-dates" role="row"><span role="cell" class="calendar-week-number">Week ${weekIndex + 1}</span>${week.dates.map(date => `<span role="cell" class="${date < model.first || date > model.last ? 'is-outside' : ''}"><time datetime="${dateKey(date)}">${model.range === 'roster' || date.getMonth() !== model.month.getMonth() ? `${date.getDate()} ${date.toLocaleDateString('en-GB', { month: 'short' })}` : date.getDate()}</time></span>`).join('')}</div>
+  return `<div class="calendar-lane calendar-day-head" role="row"><span role="columnheader">Pilots / overlaps</span>${days.map(day => `<span role="columnheader">${day}</span>`).join('')}</div>` + model.weeks.map((week, weekIndex) => {
+    const todayColumn = week.dates.findIndex(date => dateKey(date) === today);
+    return `
+    <div class="calendar-week${todayColumn >= 0 ? ' has-today' : ''}" role="rowgroup"${todayColumn >= 0 ? ` style="--today-column: ${todayColumn}"` : ''}>
+      <div class="calendar-lane calendar-dates" role="row"><span role="cell" class="calendar-week-number">Week ${weekIndex + 1}</span>${week.dates.map(date => `<span role="cell" class="${date < model.first || date > model.last ? 'is-outside' : ''}${dateKey(date) === today ? ' is-today' : ''}"><time datetime="${dateKey(date)}"${dateKey(date) === today ? ' aria-current="date" title="Today"' : ''}>${model.range === 'roster' || date.getMonth() !== model.month.getMonth() ? `${date.getDate()} ${date.toLocaleDateString('en-GB', { month: 'short' })}` : date.getDate()}</time></span>`).join('')}</div>
       ${week.rows.map((bars, index) => `<div class="calendar-lane calendar-pilot-lane" role="row"><span class="calendar-row-name" role="rowheader" style="--crew-colour: ${model.crews[index].colour}" title="${escapeHtml(model.crews[index].name)}">${escapeHtml(model.crews[index].name)}</span>${bars.map(bar => button(bar, `calendar-${bar.kind}${bar.outside ? ' is-outside' : ''}`, `--crew-colour: ${model.crews[index].colour}`)).join('')}</div>`).join('')}
       ${timeline(week)}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }

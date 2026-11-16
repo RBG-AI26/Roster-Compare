@@ -48,6 +48,8 @@ Each crew card has a Home city / domicile selector limited to Adelaide, Brisbane
 
 The calendar uses the existing parser's roster-local wall dates and times; it does not add time-zone conversion or turn the times into UTC instants. Bars cover each touched calendar date; click to see their exact times.
 
+Today's date uses the viewing device's local date. Its column has a subtle shade across the date, pilot rows and Together timelines in both light and dark mode, including across multi-day trip bars.
+
 ## Duty start and finish days
 
 The calendar and comparison table include assumed domicile presence before report and after release, as well as full days off. For example, a duty landing at 05:00 and releasing at **05:30 on 15 December** becomes available from **05:30**, not midnight the next day and not the landing time. A following duty starting at 07:45 ends the shared window at 07:45. The timeline qualifies pairs using the minimum-overlap threshold and combines coincident pairs into larger groups. The table continues to require all selected pilots to overlap.

@@ -1,6 +1,6 @@
-import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261116-email1";
-import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261116-email1";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261116-email1";
+import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261116-today1";
+import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261116-today1";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261116-today1";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const THEME_STORAGE_KEY = "roster-compare-theme";
@@ -51,6 +51,7 @@ const HOME_PORTS = { ADL: "Adelaide", BNE: "Brisbane", CBR: "Canberra", DRW: "Da
 let calendarRange = "roster";
 let calendarMonth = null;
 let calendarModel = null;
+let renderedCalendarDate = null;
 
 let loadedRosters = [];
 let isProcessing = false;
@@ -80,6 +81,16 @@ calendarGrid.addEventListener("click", (event) => {
 });
 calendarDetailClose.addEventListener("click", () => { calendarDetails.hidden = true; });
 
+// A restored browser tab or installed app may still show yesterday's markup.
+function refreshCalendarToday() {
+  const today = dateKey(new Date());
+  if (!calendarModel || renderedCalendarDate === today) return;
+  calendarGrid.innerHTML = renderCalendarMarkup(calendarModel);
+  renderedCalendarDate = today;
+}
+window.addEventListener("focus", refreshCalendarToday);
+window.addEventListener("pageshow", refreshCalendarToday);
+
 function moveCalendarMonth(offset) {
   if (!calendarMonth || !currentPayload) return;
   const calendarRosters = selectedRosters().map((roster) => roster.parsed);
@@ -107,6 +118,7 @@ function renderCalendar() {
   calendarNext.disabled = calendarMonth >= bounds.last;
   calendarLegend.innerHTML = calendarModel.crews.map((crew) => `<span style="--crew-colour: ${crew.colour}"><strong>${escapeHtml(crew.name)}</strong><span>Home ${escapeHtml(crew.domicile || "unknown")} · base ${escapeHtml(crew.base || "unknown")}</span></span>`).join("");
   calendarGrid.innerHTML = renderCalendarMarkup(calendarModel);
+  renderedCalendarDate = dateKey(new Date());
   calendarDetails.hidden = true;
 }
 

@@ -17,6 +17,7 @@
   --calendar-hover: #263344;
   --calendar-details: #171e28;
   --calendar-cell-line: #1b232c;
+  --calendar-today-shade: rgba(125, 180, 230, .10);
   --ground-bg: #28263a;
   --ground-text: #e3ddf4;
   --leave-text: #c5b7d7;
@@ -439,7 +440,17 @@ button:disabled { cursor: not-allowed; }
 .calendar-all-away { --overlap-colour: #38bdf8; --overlap-bg: var(--all-away-bg); }
 .calendar-scroll { overflow-x: auto; border: 1px solid var(--calendar-line); border-radius: 12px; }
 .calendar-grid { min-width: 930px; font-size: .73rem; }
-.calendar-lane { display: grid; grid-template-columns: 108px repeat(7, minmax(0, 1fr)); align-items: stretch; }
+.calendar-grid { --calendar-label-width: 108px; }
+.calendar-lane { display: grid; grid-template-columns: var(--calendar-label-width) repeat(7, minmax(0, 1fr)); align-items: stretch; }
+.calendar-week { position: relative; }
+/* Shade the whole date column, including the part of any multi-day trip. */
+.calendar-week.has-today::after {
+  content: ''; position: absolute; top: 0; bottom: 0;
+  left: calc(var(--calendar-label-width) + (100% - var(--calendar-label-width)) / 7 * var(--today-column));
+  width: calc((100% - var(--calendar-label-width)) / 7);
+  background: var(--calendar-today-shade); pointer-events: none; z-index: 2;
+}
+.calendar-dates .is-today time { color: var(--accent-strong); }
 .calendar-day-head { background: var(--calendar-head); font-weight: 700; border-bottom: 1px solid var(--calendar-line); }
 .calendar-day-head > span { padding: 14px 8px; }
 .calendar-week + .calendar-week { border-top: 1px solid var(--calendar-line); }
@@ -530,6 +541,7 @@ button:disabled { opacity: .4; }
   --calendar-hover: #e0eaf5;
   --calendar-details: #f0f4fa;
   --calendar-cell-line: #e0e7ef;
+  --calendar-today-shade: rgba(65, 110, 160, .09);
   --ground-bg: #ede8f8;
   --ground-text: #42305f;
   --leave-text: #624883;
