@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { createHash } from 'node:crypto';
+import * as email from '../email-rosters.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { shortPeriod } from './fixtures/short-period.mjs';
@@ -92,7 +94,7 @@ function file(index) {
   return { name: data.fileName, type: 'text/plain', text: async () => data.text };
 }
 // A minimal DOM adapter exercises event handling/state without a browser dependency.
-function setup(saved, theme) {
+function setup(saved, theme, emailFetch) {
   const store = new Map(saved ? [[storageKey, JSON.stringify(saved)]] : []);
   if (theme) store.set("roster-compare-theme", theme);
   const elements = new Map();
@@ -105,12 +107,15 @@ function setup(saved, theme) {
       scrollIntoView() {}, querySelectorAll: () => [], appendChild(child) { this.children.push(child); }, reset() {}, checkValidity: () => true, reportValidity: () => true,
     };
   }
-  const context = vm.createContext({ ...parser, ...calendar, compareRosterGroup: (...args) => { comparisonCalls += 1; return parser.compareRosterGroup(...args); }, console, Error, navigator: {}, window: { addEventListener() {} },
+  const context = vm.createContext({ ...parser, ...calendar, ...email, ...(emailFetch ? { fetchEmailRosters: (connection, known) => email.fetchEmailRosters(connection, known, emailFetch) } : {}), compareRosterGroup: (...args) => { comparisonCalls += 1; return parser.compareRosterGroup(...args); }, console, Error, navigator: {}, window: { addEventListener() {} },
     document: { documentElement: { dataset: {} }, getElementById(id) { assert.ok(html.includes(`id="${id}"`), `Missing HTML element ${id}`); if (!elements.has(id)) elements.set(id, element()); return elements.get(id); }, createElement: element },
     localStorage: { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: k => store.delete(k) },
   });
   vm.runInContext(app, context);
   return { context, elements, store, comparisonCalls: () => comparisonCalls, add: files => context.addRosterFiles(files),
+    connect(code) { elements.get('email-connection-code').value = code; return context.connectEmailRoster(); },
+    refresh: () => context.refreshEmailConnections(),
+    disconnect(index) { elements.get('email-connections').events.click({ target: { closest: () => ({ dataset: { disconnectEmail: String(index) } }) } }); },
     select(index, checked) { elements.get('crew-list').events.change({ target: { closest: selector => selector === '[data-roster-index]' ? ({ dataset: { rosterIndex: String(index) }, checked }) : null } }); },
     domicile(index, value) { elements.get('crew-list').events.change({ target: { closest: selector => selector === '[data-domicile-index]' ? ({ dataset: { domicileIndex: String(index) }, value }) : null } }); },
     remove(index) { elements.get('crew-list').events.click({ target: { closest: () => ({ dataset: { removeIndex: String(index) } }) } }); },
@@ -356,4 +361,112 @@ test('three selected pilots automatically retain a matching pair when the third 
   ui.remove(2);
   assert.equal(ui.elements.get('selection-count').textContent,'2 selected');
   assert.match(ui.elements.get('calendar-grid').innerHTML,/calendar-overlap/);
+});
+
+
+const emailCode = 'roster-overlap:' + 'a'.repeat(48);
+function emailResponse(texts, known = {}, staffNumber = '123456') {
+  const entries = texts.map((text, index) => ({ periodKey: `period-${index}`, fileName: `email-${index}.txt`, rosterText: text,
+    contentHash: createHash('sha256').update(text).digest('hex'), issuedAt: '2026-11-16T00:00:00Z', storedAtUtc: '2026-11-16T01:00:00Z' }));
+  return { staffNumber, name: 'TEST PILOT A', periods: entries.map(({ rosterText, ...metadata }) => metadata), changed: entries.filter(entry => known[entry.periodKey] !== entry.contentHash), unavailable: [], checkedAtUtc: '2026-11-16T02:00:00Z', message: texts.length ? '' : 'Waiting for emailed roster text.' };
+}
+
+test('emailed periods connect as one pilot, mix with manual uploads, and revisions retain settings and other periods', async () => {
+  let texts = [shortPeriod(), shortPeriod({ start: new Date(2026, 10, 30), bid: '2' })];
+  const knownRequests = [];
+  const ui = setup(undefined, undefined, async (url, options) => {
+    assert.equal(url, email.EMAIL_ROSTER_API);
+    assert.equal(options.cache, 'no-store');
+    assert.equal(options.headers.authorization, 'Bearer ' + 'a'.repeat(48));
+    const known = JSON.parse(options.body).known; knownRequests.push(known);
+    return Response.json(emailResponse(texts, known));
+  });
+  await ui.connect(emailCode);
+  assert.equal(ui.elements.get('roster-count').textContent, '1 / 5 loaded');
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.calendar.length', ui.context), 56);
+  await ui.add([file(0)]);
+  ui.domicile(0, 'ADL'); ui.select(0, false);
+  const colour = vm.runInContext('loadedRosters[0].parsed.colour', ui.context);
+  texts[0] = shortPeriod({ issued: '16Nov26 1055', duty: 'LD' });
+  await ui.refresh();
+  assert.equal(vm.runInContext('loadedRosters[0].files.length', ui.context), 2);
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.calendar[0].dutyCode', ui.context), 'LD');
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.calendar.length', ui.context), 56);
+  assert.equal(vm.runInContext('loadedRosters[0].domicile', ui.context), 'ADL');
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.colour', ui.context), colour);
+  assert.equal(vm.runInContext('loadedRosters[0].selected', ui.context), false);
+  assert.equal(Object.keys(knownRequests[1]).length, 2);
+  await ui.refresh();
+  assert.match(ui.elements.get('email-status').textContent, /0 roster periods updated/);
+  const saved = JSON.parse(ui.store.get(storageKey));
+  assert.equal(saved.emailConnections.length, 1);
+  assert.equal(saved.currentInputs.rosters[0].files[0].emailSource.staffNumber, '123456');
+  ui.disconnect(0);
+  assert.equal(JSON.parse(ui.store.get(storageKey)).emailConnections.length, 0);
+  assert.equal(vm.runInContext('loadedRosters[0].files.length', ui.context), 2);
+});
+
+test('failed or revoked refresh retains the last valid files; a bad period makes its pilot update atomic', async () => {
+  let response = emailResponse([shortPeriod()]);
+  let status = 200;
+  const ui = setup(undefined, undefined, async () => Response.json(response, { status }));
+  await ui.connect(emailCode);
+  const previous = vm.runInContext('loadedRosters[0].text', ui.context);
+  status = 403; response = { error: 'Access revoked' };
+  await ui.refresh();
+  assert.match(ui.elements.get('email-status').textContent, /Access revoked/);
+  assert.equal(vm.runInContext('loadedRosters[0].text', ui.context), previous);
+  status = 200;
+  response = emailResponse([shortPeriod({ duty: 'LD', issued: '16Nov26 1055' }), 'invalid roster']);
+  await ui.refresh();
+  assert.equal(vm.runInContext('loadedRosters[0].files.length', ui.context), 1);
+  assert.equal(vm.runInContext('loadedRosters[0].text', ui.context), previous);
+  response = emailResponse([shortPeriod({ staff: '654321' })]);
+  await ui.refresh();
+  assert.match(ui.elements.get('email-status').textContent, /different pilot/);
+  assert.equal(vm.runInContext('loadedRosters[0].text', ui.context), previous);
+});
+
+test('empty connections wait for first email and clear saved data removes codes and rosters', async () => {
+  let texts = [];
+  const ui = setup(undefined, undefined, async (_url, options) => Response.json(emailResponse(texts, JSON.parse(options.body).known)));
+  await ui.connect(emailCode);
+  assert.match(ui.elements.get('email-status').textContent, /Waiting/);
+  assert.equal(JSON.parse(ui.store.get(storageKey)).emailConnections.length, 1);
+  assert.equal(ui.elements.get('roster-count').textContent, '0 / 5 loaded');
+  texts = [shortPeriod()];
+  await ui.refresh();
+  assert.equal(ui.elements.get('roster-count').textContent, '1 / 5 loaded');
+  ui.elements.get('clear-storage-button').events.click();
+  assert.equal(ui.store.has(storageKey), false);
+  assert.equal(vm.runInContext('emailConnections.length', ui.context), 0);
+  assert.equal(ui.elements.get('email-connection-code').value, '');
+});
+
+test('opening a saved connection checks only known hashes and removing its pilot disconnects it', async () => {
+  const requests = [];
+  const fetcher = async (_url, options) => {
+    const known = JSON.parse(options.body).known; requests.push(known);
+    return Response.json(emailResponse([shortPeriod()], known));
+  };
+  const first = setup(undefined, undefined, fetcher);
+  await first.connect(emailCode);
+  const saved = JSON.parse(first.store.get(storageKey));
+  const restored = setup(saved, undefined, fetcher);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 2);
+  assert.equal(Object.keys(requests[1]).length, 1);
+  assert.equal(vm.runInContext('loadedRosters[0].files.length', restored.context), 1);
+  restored.remove(0);
+  assert.equal(vm.runInContext('emailConnections.length', restored.context), 0);
+});
+
+test('capacity failures and invalid connection codes do not save a new connection', async () => {
+  const ui = setup(undefined, undefined, async () => Response.json(emailResponse([shortPeriod()])));
+  await ui.add([0,1,2,3,4].map(file));
+  await ui.connect(emailCode);
+  assert.match(ui.elements.get('email-status').textContent, /up to 5/);
+  assert.equal(vm.runInContext('emailConnections.length', ui.context), 0);
+  await ui.connect('https://untrusted.example/token');
+  assert.match(ui.elements.get('email-status').textContent, /private Overlap connection code/);
 });

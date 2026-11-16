@@ -1,11 +1,12 @@
-const CACHE_NAME = "roster-compare-static-v22";
+const CACHE_NAME = "roster-compare-static-v23";
 const APP_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=20261115-12",
-  "./app.js?v=20261115-12",
-  "./roster-browser.js?v=20261115-12",
-  "./roster-calendar.js?v=20261115-12",
+  "./styles.css?v=20261116-email1",
+  "./app.js?v=20261116-email1",
+  "./email-rosters.js?v=20261116-email1",
+  "./roster-browser.js?v=20261116-email1",
+  "./roster-calendar.js?v=20261116-email1",
   "./manifest.json",
   "./apple-touch-icon.png",
   "./icon-192.png",
@@ -40,6 +41,8 @@ self.addEventListener("fetch", (event) => {
 
   const requestUrl = new URL(event.request.url);
   const isSameOrigin = requestUrl.origin === self.location.origin;
+  // Authenticated roster responses must never enter the offline asset cache.
+  if (requestUrl.pathname.startsWith("/api/") || event.request.headers.has("authorization")) return;
 
   if (event.request.mode === "navigate") {
     event.respondWith(networkFirst(event.request, "./index.html"));

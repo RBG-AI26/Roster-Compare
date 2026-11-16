@@ -107,3 +107,15 @@ This repo now includes a root `index.html`, so it can be hosted directly as a st
 Run `node --test tests/*.test.mjs` for module-export, comparison, date-resolution, duty-boundary, calendar and upload/state regression checks. The module-startup check verifies that every named browser import is actually exported, preventing the startup failure that left import and Compare inactive. Upload/state checks use a small DOM adapter; they do not replace browser layout and interaction checks.
 
 Application scripts and styles use matching release URLs to prevent a refreshed upload screen from reusing an older comparison engine. The service worker revalidates network requests and retains an offline copy of the current release. When updating these files, keep their release values aligned in `index.html`, `app.js` and `service-worker.js`.
+
+## Emailed roster connections
+
+A pilot can opt in to Overlap sharing through the **Roster Export iCal** administrator. In that app, enable Overlap for an active approved staff member and copy their separate private `roster-overlap:` connection code. Calendar subscription URLs and staff numbers do not grant Overlap access.
+
+In Overlap, paste the code into **Emailed rosters → Private connection code** and choose **Connect emailed roster**. Connections refresh once when opening the app, or through **Refresh emailed rosters**. There is no periodic background polling. Emailed periods combine with manual uploads, keeping the five-pilot limit, domicile, colours and selection. Changed source text is parsed locally and a pilot's update is applied only after all its changed periods validate. A failed or revoked refresh retains the last downloaded roster.
+
+Codes and downloaded text are saved in this browser's local storage. **Disconnect** stops future refreshes but keeps downloaded rosters. **Remove** deletes a pilot's loaded rosters and disconnects them; **Clear saved data** removes all roster data and connection codes on this device. Revoking or replacing a code in Export stops future downloads after KV propagation; it cannot withdraw copies already downloaded. Share codes only with people authorised by the pilot.
+
+The fixed API is `https://roster-export-ical.rosterical.workers.dev/api/overlap/sync`. It requires a separate bearer code, returns only that pilot's recent/future periods, and receives the content hashes already loaded. Unchanged refreshes read four KV keys and use no KV list or write operations. Only changed text is downloaded. The service worker does not cache private API responses. Comparisons remain on the device.
+
+Deploy the Export API before this frontend. Export's CORS allow-list includes `https://rbg-ai26.github.io`; configure `OVERLAP_ALLOWED_ORIGINS` in that Worker if this app moves to another origin. Roster Compare can remain on GitHub Pages: no additional Cloudflare Worker or account is required.
