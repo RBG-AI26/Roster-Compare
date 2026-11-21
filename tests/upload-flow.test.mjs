@@ -383,6 +383,7 @@ test('emailed periods connect as one pilot, mix with manual uploads, and revisio
   });
   await ui.connect(emailCode);
   assert.equal(ui.elements.get('roster-count').textContent, '1 / 5 loaded');
+  assert.doesNotMatch(ui.elements.get('crew-list').innerHTML, /data-(?:roster|domicile)-index="\d+"[^>]*\bdisabled/);
   assert.equal(vm.runInContext('loadedRosters[0].parsed.calendar.length', ui.context), 56);
   await ui.add([file(0)]);
   ui.domicile(0, 'ADL'); ui.select(0, false);
@@ -443,7 +444,7 @@ test('empty connections wait for first email and clear saved data removes codes 
   assert.equal(ui.elements.get('email-connection-code').value, '');
 });
 
-test('opening a saved connection checks only known hashes and removing its pilot disconnects it', async () => {
+test('a saved connection refreshes on opening without locking crew settings', async () => {
   const requests = [];
   const fetcher = async (_url, options) => {
     const known = JSON.parse(options.body).known; requests.push(known);
@@ -451,11 +452,33 @@ test('opening a saved connection checks only known hashes and removing its pilot
   };
   const first = setup(undefined, undefined, fetcher);
   await first.connect(emailCode);
+  await first.add([file(0), file(1)]);
+  first.select(2, false);
   const saved = JSON.parse(first.store.get(storageKey));
-  const restored = setup(saved, undefined, fetcher);
+  let finishRefresh;
+  const pendingRefresh = new Promise(resolve => { finishRefresh = resolve; });
+  const restored = setup(saved, undefined, async (...args) => {
+    await pendingRefresh;
+    return fetcher(...args);
+  });
+  const crewList = restored.elements.get('crew-list');
+  restored.select(1, false);
+  restored.select(2, true);
+  restored.domicile(0, 'ADL');
+  const controlsDuringRefresh = crewList.innerHTML;
+  const savedDuringRefresh = JSON.parse(restored.store.get(storageKey));
+  finishRefresh();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(requests.length, 2);
   assert.equal(Object.keys(requests[1]).length, 1);
+  const disabledSettings = /data-(?:roster|domicile)-index="\d+"[^>]*\bdisabled/;
+  assert.doesNotMatch(controlsDuringRefresh, disabledSettings);
+  assert.doesNotMatch(crewList.innerHTML, disabledSettings);
+  assert.deepEqual(savedDuringRefresh.currentInputs.rosters.map(roster => roster.selected), [true, false, true]);
+  assert.equal(savedDuringRefresh.currentInputs.rosters[0].domicile, 'ADL');
+  const refreshed = JSON.parse(restored.store.get(storageKey));
+  assert.deepEqual(refreshed.currentInputs.rosters.map(roster => roster.selected), [true, false, true]);
+  assert.equal(refreshed.currentInputs.rosters[0].domicile, 'ADL');
   assert.equal(vm.runInContext('loadedRosters[0].files.length', restored.context), 1);
   restored.remove(0);
   assert.equal(vm.runInContext('emailConnections.length', restored.context), 0);
