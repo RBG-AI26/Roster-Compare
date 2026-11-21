@@ -1,6 +1,6 @@
-import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261121-crew1";
-import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261121-crew1";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261121-crew1";
+import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261121-bid1";
+import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261121-bid1";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261121-bid1";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const THEME_STORAGE_KEY = "roster-compare-theme";
@@ -45,10 +45,15 @@ const calendarDetailTitle = document.getElementById("calendar-detail-title");
 const calendarDetailSubtitle = document.getElementById("calendar-detail-subtitle");
 const calendarDetailText = document.getElementById("calendar-detail-text");
 const calendarDetailClose = document.getElementById("calendar-detail-close");
+const calendarPeriodInput = document.getElementById("calendar-bid-period");
+const calendarPeriodControl = document.getElementById("calendar-bid-period-control");
 const calendarRangeInput = document.getElementById("calendar-range");
 const calendarRangeSummary = document.getElementById("calendar-range-summary");
 const HOME_PORTS = { ADL: "Adelaide", BNE: "Brisbane", CBR: "Canberra", DRW: "Darwin", HBA: "Hobart", MEL: "Melbourne", PER: "Perth", SYD: "Sydney" };
 let calendarRange = "roster";
+let preferredBidPeriod = "";
+let activeBidPeriod = null;
+let periodRosters = [];
 let calendarMonth = null;
 let calendarModel = null;
 let renderedCalendarDate = null;
@@ -61,6 +66,12 @@ let activeFilter = "all";
 let deferredInstallPrompt = null;
 let pendingReloadForServiceWorker = false;
 
+calendarPeriodInput.addEventListener("change", () => {
+  preferredBidPeriod = calendarPeriodInput.value;
+  calendarMonth = null;
+  prepareComparisons();
+  rerunComparison();
+});
 calendarRangeInput.addEventListener("change", () => {
   calendarRange = calendarRangeInput.value === "month" ? "month" : "roster";
   if (currentPayload) renderCalendar();
@@ -93,8 +104,7 @@ window.addEventListener("pageshow", refreshCalendarToday);
 
 function moveCalendarMonth(offset) {
   if (!calendarMonth || !currentPayload) return;
-  const calendarRosters = selectedRosters().map((roster) => roster.parsed);
-  const bounds = calendarBounds(calendarRosters);
+  const bounds = calendarBounds(selectedPeriodRosters(), activeBidPeriod);
   const next = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + offset, 1);
   if (next < bounds.first || next > bounds.last) return;
   calendarMonth = next;
@@ -103,15 +113,21 @@ function moveCalendarMonth(offset) {
 }
 
 function renderCalendar() {
-  const calendarRosters = selectedRosters().map((roster) => roster.parsed);
-  const bounds = calendarBounds(calendarRosters);
+  const calendarRosters = selectedPeriodRosters();
+  const bounds = calendarBounds(calendarRosters, activeBidPeriod);
   if (!calendarMonth || calendarMonth < bounds.first || calendarMonth > bounds.last) {
-    calendarMonth = initialCalendarMonth(calendarRosters);
+    calendarMonth = initialCalendarMonth(calendarRosters, activeBidPeriod);
   }
-  calendarModel = buildRosterCalendar(calendarRosters, calendarMonth, { minOverlapMinutes: Number(minOverlapInput.value || 60), range: calendarRange });
+  calendarModel = buildRosterCalendar(calendarRosters, calendarMonth, {
+    minOverlapMinutes: Number(minOverlapInput.value || 60), range: calendarRange, period: activeBidPeriod,
+  });
   calendarTitle.textContent = calendarModel.title;
   calendarRangeInput.value = calendarRange;
-  calendarRangeSummary.textContent = calendarRange === "roster" ? `${calendarModel.dayCount} days · ${calendarModel.weeks.length} calendar weeks · full roster` : "Month view";
+  const weekRange = activeBidPeriod?.cycleStart
+    ? `Weeks ${calendarModel.weeks[0].number}–${calendarModel.weeks.at(-1).number}`
+    : `${calendarModel.weeks.length} calendar weeks`;
+  calendarRangeSummary.textContent = calendarRange === "roster" || activeBidPeriod?.cycleStart
+    ? `${calendarModel.dayCount} days · ${weekRange}` : "Month view";
   calendarPrevious.hidden = calendarRange !== "month";
   calendarNext.hidden = calendarRange !== "month";
   calendarPrevious.disabled = calendarMonth <= bounds.first;
@@ -194,7 +210,6 @@ crewList.addEventListener("change", (event) => {
     roster.domicile = domicile;
     roster.parsed.domicile = domicile;
     roster.parsed.requiresDomicile = false;
-    comparisonCache.clear();
     prepareComparisons();
     renderCrewList();
     updateSelection();
@@ -211,7 +226,6 @@ crewList.addEventListener("click", (event) => {
   const removed = loadedRosters.splice(Number(button.dataset.removeIndex), 1)[0];
   emailConnections = emailConnections.filter(connection => connection.staffNumber !== removed?.parsed.staffNumber);
   renderEmailConnections();
-  comparisonCache.clear();
   prepareComparisons();
   renderCrewList();
   updateSelection();
@@ -256,6 +270,10 @@ clearStorageButton.addEventListener("click", () => {
   renderEmailConnections();
   comparisonCache.clear();
   activeFilter = "all";
+  preferredBidPeriod = "";
+  activeBidPeriod = null;
+  periodRosters = [];
+  calendarPeriodControl.hidden = true;
   calendarMonth = null;
   calendarRange = "roster";
   calendarRangeInput.value = "roster";
@@ -307,10 +325,7 @@ async function addRosterFiles(files) {
   fileInput.disabled = false;
   clearStorageButton.disabled = false;
   fileInput.value = "";
-  if (added) {
-    comparisonCache.clear();
-    prepareComparisons();
-  }
+  if (added) prepareComparisons();
   renderCrewList();
   rerunComparison();
   persistState();
@@ -346,6 +361,10 @@ async function readRosterFile(file) {
 
 function selectedRosters() {
   return loadedRosters.filter((roster) => roster.selected);
+}
+
+function selectedPeriodRosters() {
+  return periodRosters.filter((_, index) => loadedRosters[index].selected);
 }
 
 function hideResults() {
@@ -386,7 +405,7 @@ function renderCrewList() {
           <input type="checkbox" data-roster-index="${index}" ${roster.selected ? "checked" : ""} ${isProcessing ? "disabled" : ""} />
           <span class="crew-details">
             <strong>${escapeHtml(name)}</strong>
-            <span>${escapeHtml([crew.staffNumber && `Staff ${crew.staffNumber}`, crew.base, crew.bidPeriod && `BP ${crew.bidPeriod}`].filter(Boolean).join(" · ") || "Crew details unavailable")}</span>
+            <span>${escapeHtml([crew.staffNumber && `Staff ${crew.staffNumber}`, crew.base, crew.haul, crew.bidPeriod && `BP${crew.bidPeriod.replaceAll(" / ", " / BP")}`].filter(Boolean).join(" · ") || "Crew details unavailable")}</span>
             <span>${escapeHtml(crew.coverageStart.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }))} – ${escapeHtml(crew.coverageEnd.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }))}</span>
             <span class="crew-filename">${roster.files.length > 1 ? `${roster.files.length} roster files · ` : ""}${escapeHtml(roster.fileName)}</span>
           </span>
@@ -409,18 +428,86 @@ function domicileOptions(crew) {
   return placeholder + Object.entries(HOME_PORTS).map(([port, city]) => `<option value="${port}" ${port === crew.domicile ? "selected" : ""}>${port} — ${city}</option>`).join("");
 }
 
+function updateBidPeriod() {
+  const periods = new Map();
+  const other = [];
+  for (const { parsed } of loadedRosters.flatMap(roster => roster.files)) {
+    const period = parsed.period;
+    if (!period) {
+      other.push(parsed);
+      continue;
+    }
+    const existing = periods.get(period.key);
+    if (!existing) periods.set(period.key, { ...period });
+    else {
+      if (period.first < existing.first) { existing.first = period.first; existing.firstWeek = period.firstWeek; }
+      if (period.last > existing.last) { existing.last = period.last; existing.lastWeek = period.lastWeek; }
+    }
+  }
+  if (!periods.size) {
+    activeBidPeriod = null;
+    calendarPeriodControl.hidden = true;
+    return;
+  }
+  const choices = [...periods.values()].sort((a, b) => b.cycleStart - a.cycleStart);
+  for (const period of choices) {
+    period.label = `BP${period.number}${period.lastWeek - period.firstWeek === 3 ? period.firstWeek : ""}`;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const defaultPeriod = choices.find(period => period.first <= today && today <= period.last) ?? choices[0];
+  if (other.length) choices.push({
+    key: "other",
+    label: "Other rosters",
+    first: new Date(Math.min(...other.map(roster => +roster.coverageStart))),
+    last: new Date(Math.max(...other.map(roster => +roster.coverageEnd))),
+  });
+  activeBidPeriod = choices.find(period => period.key === preferredBidPeriod) ?? defaultPeriod;
+  calendarPeriodControl.hidden = choices.length < 2;
+  calendarPeriodInput.innerHTML = choices.map(period => {
+    const date = period.cycleStart && period.first.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    return `<option value="${period.key}">${period.label}${date ? ` · ${date}` : ""}</option>`;
+  }).join("");
+  calendarPeriodInput.value = activeBidPeriod.key;
+}
+
+function rosterInBidPeriod(roster, period) {
+  if (!period) return roster.parsed;
+  const identified = roster.files.filter(({ parsed }) => parsed.period?.key === period.key);
+  const files = identified.length ? identified : roster.files.filter(({ parsed }) =>
+    !parsed.period && parsed.coverageStart <= period.last && parsed.coverageEnd >= period.first);
+  if (!files.length) return {
+    ...roster.parsed, bidPeriod: null, haul: null, coverageStart: null, coverageEnd: null,
+    calendar: [], trips: [], offDays: [], reserveDays: [], portWindows: [], homeBoundaryWindows: [], unresolvedDuties: [],
+  };
+  const parsed = mergeRosterPeriods(files.map(file => file.parsed));
+  return { ...parsed, domicile: roster.domicile, requiresDomicile: !roster.domicile, colour: roster.parsed.colour };
+}
+
+function compareBidPeriod(rosters, minutes) {
+  const payload = compareRosterGroup(rosters, { minPortOverlapMinutes: minutes });
+  if (activeBidPeriod) {
+    const first = dateKey(activeBidPeriod.first), last = dateKey(activeBidPeriod.last);
+    payload.matches = payload.matches.filter(match => first <= match.sort_date && match.sort_date <= last);
+  }
+  return payload;
+}
+
 function prepareComparisons() {
+  updateBidPeriod();
+  periodRosters = loadedRosters.map(roster => rosterInBidPeriod(roster, activeBidPeriod));
+  comparisonCache.clear();
   if (!minOverlapInput.checkValidity()) return;
   const minutes = Number(minOverlapInput.value || 60);
   for (let mask = 1; mask < (1 << loadedRosters.length); mask += 1) {
-    const rosters = loadedRosters.filter((_, index) => mask & (1 << index));
+    const rosters = periodRosters.filter((_, index) => mask & (1 << index));
     if (rosters.length < 2) continue;
-    comparisonCache.set(`${minutes}:${mask}`, compareRosterGroup(rosters.map((roster) => roster.parsed), { minPortOverlapMinutes: minutes }));
+    comparisonCache.set(`${minutes}:${mask}`, compareBidPeriod(rosters, minutes));
   }
 }
 
 function rerunComparison() {
-  const rosters = selectedRosters();
+  const rosters = selectedPeriodRosters();
   if (rosters.length < 2) {
     hideResults();
     renderCrewList();
@@ -436,7 +523,7 @@ function rerunComparison() {
     const mask = loadedRosters.reduce((value, roster, index) => value | (roster.selected ? 1 << index : 0), 0);
     const key = `${minutes}:${mask}`;
     if (!comparisonCache.has(key)) {
-      comparisonCache.set(key, compareRosterGroup(rosters.map((roster) => roster.parsed), { minPortOverlapMinutes: minutes }));
+      comparisonCache.set(key, compareBidPeriod(rosters, minutes));
     }
     const payload = comparisonCache.get(key);
     currentPayload = payload;
@@ -523,7 +610,7 @@ function renderSummaryCard(index, summary) {
       <li>Staff number: ${escapeHtml(summary.staff_number || "Unknown")}</li>
       <li>Base: ${escapeHtml(summary.base || "Unknown")}</li>
       <li>Domicile: ${escapeHtml(summary.domicile || summary.base || "Unknown")}</li>
-      <li>Bid period: ${escapeHtml(summary.bid_period || "Unknown")}</li>
+      <li>${escapeHtml(summary.bid_period ? `BP${summary.bid_period.replaceAll(" / ", " / BP")}${summary.haul ? ` · ${summary.haul}` : ""}` : summary.coverage_start ? "Bid period unknown" : "No roster for this bid period")}</li>
       <li>Dates: ${escapeHtml(summary.coverage_start || "Unknown")} – ${escapeHtml(summary.coverage_end || "Unknown")}</li>
       <li>Uncertain duties: ${escapeHtml(String(summary.unresolved_duties.length))}</li>
     </ul>
@@ -574,6 +661,7 @@ function persistState() {
         activeFilter,
         calendarMonth: calendarMonth ? dateKey(calendarMonth) : null,
         calendarRange,
+        preferredBidPeriod,
         minOverlapMinutes: Number(minOverlapInput.value || 60),
         emailConnections: emailConnections.map(({ code, staffNumber, name, checkedAtUtc, updatedAtUtc }) => ({ code, staffNumber, name, checkedAtUtc, updatedAtUtc })),
         currentInputs: {
@@ -629,6 +717,7 @@ function restorePersistedState() {
   }
 
   calendarRange = savedState.calendarRange === "month" ? "month" : "roster";
+  preferredBidPeriod = typeof savedState.preferredBidPeriod === "string" ? savedState.preferredBidPeriod : "";
   calendarRangeInput.value = calendarRange;
 
   for (const roster of savedState.currentInputs.rosters) {
@@ -778,7 +867,6 @@ async function refreshEmailConnections() {
 }
 
 function emailRostersChanged() {
-  comparisonCache.clear();
   prepareComparisons();
   renderCrewList();
   rerunComparison();

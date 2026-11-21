@@ -351,14 +351,40 @@ export function parseRosterText(fileName, rawText) {
     crewName: extractCrewName(text, source) || "Unknown",
     staffNumber: matchGroup(text, /Staff\s*(?:No\.?|Number)\s*:\s*(\d+)/im),
     base: matchGroup(text, /Base\s*:\s*([A-Z]{3})/m),
-    bidPeriod: matchGroup(text, /Bid Period\s+(\d+)/im),
+    bidPeriod: matchGroup(text, /\bBid Period[ \t]*:?[ \t]*(?:BP[ \t]*)?(\d+)\b/im),
     source,
     generationDate: extractGenerationDate(text),
   };
 
-  const roster = isShortHaulRoster(text) ? parseShortHaulRoster(fileName, text, metadata) : parseLongHaulRoster(fileName, text, metadata);
+  const shortHaul = isShortHaulRoster(text);
+  const roster = shortHaul ? parseShortHaulRoster(fileName, text, metadata) : parseLongHaulRoster(fileName, text, metadata);
+  roster.haul = shortHaul ? "Short haul" : "Long haul";
+  roster.period = rosterBidPeriod(roster, shortHaul);
   roster.generatedAt = extractIssueTime(text);
   return roster;
+}
+
+function rosterBidPeriod(roster, shortHaul) {
+  const match = String(roster.bidPeriod || "").match(shortHaul ? /^(\d{3,})([15])$/ : /^(\d{3,})$/);
+  if (!match) return null;
+  const number = match[1];
+  const firstWeek = Number(match[2] || 1);
+  const lastWeek = shortHaul ? firstWeek + 3 : 8;
+  const weekOffset = (firstWeek - 1) * 7;
+  const start = roster.coverageStart;
+  const monday = addDays(start, -((start.getDay() + 6) % 7));
+  let cycleStart = addDays(monday, -weekOffset);
+  // The published BP358–423 calendar starts on 9 October 2023 and advances
+  // by 56 days. Use it to anchor partial reports that begin after week one.
+  const bp = Number(number);
+  if (bp >= 358 && bp <= 423) {
+    const scheduledStart = addDays(new Date(2023, 9, 9), (bp - 358) * 56);
+    const slotStart = addDays(scheduledStart, weekOffset);
+    const slotEnd = addDays(scheduledStart, lastWeek * 7 - 1);
+    if (start <= slotEnd && roster.coverageEnd >= slotStart) cycleStart = scheduledStart;
+  }
+  return { key: `${number}:${formatSortableLocalDate(cycleStart)}`, number, cycleStart, firstWeek, lastWeek,
+    first: addDays(cycleStart, weekOffset), last: addDays(cycleStart, lastWeek * 7 - 1) };
 }
 
 // Staff numbers take priority. A name is only a fallback when it identifies
@@ -408,6 +434,7 @@ export function mergeRosterPeriods(periods) {
   const merged = { ...newest, staffNumber: [...staff][0] || null, calendar,
     fileName: periods.map(period => period.fileName).join(" · "),
     bidPeriod: [...new Set(periods.map(period => period.bidPeriod).filter(Boolean))].join(" / "),
+    haul: [...new Set(periods.map(period => period.haul).filter(Boolean))].join(" / "),
     coverageStart: calendar[0].date, coverageEnd: calendar.at(-1).date,
     offDays: periods.flatMap((period, index) => period.offDays.filter(entry => owned(entry.date, index)).map(entry => ({ ...entry, homeWindows: offDayWindows(entry).flatMap(window => clip(window, index)) }))),
     reserveDays: periods.flatMap((period, index) => period.reserveDays.filter(entry => owned(entry.date, index))),
@@ -1462,6 +1489,7 @@ function buildSummary(roster) {
     coverage_start: roster.coverageStart ? formatDisplayLocalDate(roster.coverageStart) : null,
     coverage_end: roster.coverageEnd ? formatDisplayLocalDate(roster.coverageEnd) : null,
     bid_period: roster.bidPeriod,
+    haul: roster.haul,
     source: roster.source,
     file_name: roster.fileName,
     off_days: roster.offDays.length,
@@ -1477,7 +1505,8 @@ function buildSummary(roster) {
 }
 
 function buildNotes(rosterA, rosterB) {
-  const notes = [];
+  const notes = [rosterA, rosterB].filter(roster => !roster.coverageStart)
+    .map(roster => `${roster.crewName}: No roster available for this bid period.`);
   if (rosterA.unresolvedDuties.length) {
     notes.push(`${rosterA.crewName}: ${rosterA.unresolvedDuties.length} duty entries were treated as uncertain.`);
   }
@@ -1511,7 +1540,8 @@ function buildGroupNotes(rosters) {
     return buildNotes(rosters[0], rosters[1]);
   }
 
-  const notes = [];
+  const notes = rosters.filter(roster => !roster.coverageStart)
+    .map(roster => `${roster.crewName}: No roster available for this bid period.`);
   for (const roster of rosters) {
     if (roster.unresolvedDuties.length) {
       notes.push(`${roster.crewName}: ${roster.unresolvedDuties.length} duty entries were treated as uncertain.`);

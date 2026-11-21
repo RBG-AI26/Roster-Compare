@@ -14,6 +14,24 @@ const calendar = await import(`data:text/javascript;base64,${Buffer.from(calenda
 const storageKey = 'roster-compare-state-v2';
 const periodFile = options => ({ name: `period-${options?.bid || '1'}.txt`, type: 'text/plain', text: async () => shortPeriod(options) });
 
+function longPeriodFile({ bid, start, days = 56 }) {
+  const report = start.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const rows = Array.from({ length: days }, (_, index) => {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + index);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${day}/${month} ${'UMTWTFS'[date.getDay()]} A`;
+  });
+  return { name: `long-${bid}.txt`, type: 'text/plain', text: async () => [
+    'webCIS', 'Name: LONG HAUL PILOT  Staff No: 100000', 'Base: MEL', `Bid Period: BP${bid}`, `Date: ${report}`,
+    'Date Duty Detail', ...rows, 'END OF REPORT',
+  ].join('\n') };
+}
+
+function weekNumbers(ui) {
+  return Array.from(ui.elements.get('calendar-grid').innerHTML.matchAll(/class="calendar-week-number">Week (\d+)/g), match => Number(match[1]));
+}
+
 test('multiple short-haul files import as one pilot and one calendar row', async () => {
   const ui = setup();
   await ui.add([periodFile({ duty: 'LD' }), periodFile({ start: new Date(2026, 10, 30), bid: '2' })]);
@@ -222,6 +240,74 @@ test('calendar follows crew selection and clears alongside comparison results', 
   assert.match(ui.elements.get('calendar-grid').innerHTML, /calendar-overlap/);
   ui.elements.get('clear-storage-button').events.click();
   assert.equal(ui.elements.get('calendar-grid').innerHTML, '');
+});
+
+test('Full roster switches between eight-week bid periods and aligns both short-haul halves by date', async () => {
+  const emailed = [shortPeriod({ bid: '3781' }), shortPeriod({ bid: '3785', start: new Date(2026, 10, 30) })];
+  const ui = setup(undefined, undefined, async (_url, options) => Response.json(emailResponse(emailed, JSON.parse(options.body).known)));
+  await ui.add([
+    longPeriodFile({ bid: '377', start: new Date(2026, 8, 7) }),
+    longPeriodFile({ bid: '378', start: new Date(2026, 10, 2) }),
+  ]);
+  await ui.connect(emailCode);
+  const picker = ui.elements.get('calendar-bid-period');
+  assert.equal(ui.elements.get('calendar-bid-period-control').hidden, false);
+  assert.match(picker.innerHTML, />BP377 · 7 Sept? 2026/);
+  assert.match(picker.innerHTML, />BP378 · 2 Nov 2026/);
+  picker.value = '378:2026-11-02';
+  picker.events.change();
+
+  assert.equal(ui.elements.get('calendar-month').textContent, 'BP378 · 2 Nov 2026 – 27 Dec 2026');
+  assert.deepEqual(weekNumbers(ui), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.match(ui.elements.get('calendar-grid').innerHTML, /Week 5<\/span><span[^>]*><time datetime="2026-11-30"/);
+  assert.doesNotMatch(ui.elements.get('calendar-grid').innerHTML, /2026-10-31|No roster entry/);
+  assert.match(ui.elements.get('summary-row').innerHTML, /BP378 · Long haul/);
+  assert.match(ui.elements.get('summary-row').innerHTML, /BP3781 \/ BP3785 · Short haul/);
+  const matchingDates = vm.runInContext('currentPayload.matches.map(match => match.sort_date)', ui.context);
+  assert.ok(matchingDates.includes('2026-11-02') && matchingDates.includes('2026-12-27'));
+  assert.ok(matchingDates.every(date => date >= '2026-11-02' && date <= '2026-12-27'));
+
+  picker.value = '377:2026-09-07';
+  picker.events.change();
+  assert.match(ui.elements.get('calendar-month').textContent, /^BP377/);
+  assert.deepEqual(weekNumbers(ui), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.match(ui.elements.get('summary-row').innerHTML, /No roster for this bid period/);
+  assert.equal(vm.runInContext('currentPayload.matches.length', ui.context), 0);
+  const reopened = setup(JSON.parse(ui.store.get(storageKey)));
+  assert.match(reopened.elements.get('calendar-month').textContent, /^BP377/);
+});
+
+test('a short-haul second half shows weeks 5–8 and keeps those numbers in Month view', async () => {
+  const ui = setup();
+  const start = new Date(2027, 0, 25);
+  await ui.add([
+    periodFile({ bid: '3795', start, issued: '10Jan27 1055' }),
+    periodFile({ bid: '3795', start, issued: '10Jan27 1055', staff: '654321', name: 'TEST PILOT B' }),
+  ]);
+  assert.equal(ui.elements.get('calendar-bid-period-control').hidden, true);
+  assert.equal(ui.elements.get('calendar-month').textContent, 'BP3795 · 25 Jan 2027 – 21 Feb 2027');
+  assert.deepEqual(weekNumbers(ui), [5, 6, 7, 8]);
+  assert.match(ui.elements.get('calendar-range-summary').textContent, /28 days · Weeks 5–8/);
+  const range = ui.elements.get('calendar-range');
+  range.value = 'month';
+  range.events.change();
+  assert.equal(ui.elements.get('calendar-month').textContent, 'BP3795 · February 2027');
+  assert.deepEqual(weekNumbers(ui), [6, 7, 8]);
+  ui.elements.get('calendar-previous').events.click();
+  assert.deepEqual(weekNumbers(ui), [5]);
+});
+
+test('a partial long-haul report uses its scheduled bid-period week without filling missing days', async () => {
+  const ui = setup();
+  await ui.add([
+    longPeriodFile({ bid: '378', start: new Date(2026, 10, 9), days: 49 }),
+    periodFile({ bid: '3781' }),
+  ]);
+  assert.deepEqual(weekNumbers(ui), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.match(ui.elements.get('calendar-grid').innerHTML, /No roster entry is available|No roster/);
+  const matchingDates = vm.runInContext('currentPayload.matches.map(match => match.sort_date)', ui.context);
+  assert.ok(matchingDates.includes('2026-11-09'));
+  assert.ok(matchingDates.every(date => date >= '2026-11-09' && date <= '2026-11-29'));
 });
 
 test('calendar navigation respects coverage, persists month and opens/closes details', () => {

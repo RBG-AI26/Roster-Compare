@@ -25,7 +25,7 @@
         }
       } catch { /* Use the default theme if storage is unavailable. */ }
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20261121-crew1" />
+    <link rel="stylesheet" href="./styles.css?v=20261121-bid1" />
   </head>
   <body>
     <main class="shell">
@@ -95,6 +95,7 @@
           <div class="calendar-toolbar">
             <button id="calendar-previous" class="calendar-nav" type="button" aria-label="Previous month">←</button>
             <div class="calendar-heading"><h2 id="calendar-month"></h2><p id="calendar-range-summary" class="calendar-help"></p></div>
+            <label id="calendar-bid-period-control" class="calendar-range-control" for="calendar-bid-period" hidden>Bid period<select id="calendar-bid-period"></select></label>
             <label class="calendar-range-control" for="calendar-range">Calendar range<select id="calendar-range"><option value="roster">Full roster</option><option value="month">Month</option></select></label>
             <button id="calendar-next" class="calendar-nav" type="button" aria-label="Next month">→</button>
           </div>
@@ -142,6 +143,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js?v=20261121-crew1"></script>
+    <script type="module" src="./app.js?v=20261121-bid1"></script>
   </body>
 </html>

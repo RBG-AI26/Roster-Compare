@@ -11,17 +11,19 @@ const dayDistance = (a, b) => Math.round((Date.UTC(b.getFullYear(), b.getMonth()
 const homePort = roster => roster.requiresDomicile ? null : roster.domicile || roster.base;
 const crewName = roster => roster.displayName || roster.crewName || roster.fileName;
 const formatTime = date => date.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-export function calendarBounds(rosters) {
-  const first = new Date(Math.min(...rosters.map(roster => roster.coverageStart.getTime())));
-  const last = new Date(Math.max(...rosters.map(roster => roster.coverageEnd.getTime())));
+export function calendarBounds(rosters, period) {
+  const first = period?.first ?? new Date(Math.min(...rosters.map(roster => +roster.coverageStart)));
+  const last = period?.last ?? new Date(Math.max(...rosters.map(roster => +roster.coverageEnd)));
   return { first: new Date(first.getFullYear(), first.getMonth(), 1), last: new Date(last.getFullYear(), last.getMonth(), 1) };
 }
 // Open the month containing most of the common roster period, so a period
 // starting on 30 November opens in December rather than a mostly empty November.
-export function initialCalendarMonth(rosters) {
-  const start = new Date(Math.max(...rosters.map(roster => roster.coverageStart.getTime())));
-  const end = new Date(Math.min(...rosters.map(roster => roster.coverageEnd.getTime())));
-  if (start > end) return calendarBounds(rosters).first;
+export function initialCalendarMonth(rosters, period) {
+  const covered = rosters.filter(roster => roster.coverageStart);
+  if (!covered.length) return calendarBounds(rosters, period).first;
+  const start = new Date(Math.max(...covered.map(roster => +roster.coverageStart), period ? +period.first : -Infinity));
+  const end = new Date(Math.min(...covered.map(roster => +roster.coverageEnd), period ? +period.last : Infinity));
+  if (start > end) return calendarBounds(rosters, period).first;
   let best = new Date(start.getFullYear(), start.getMonth(), 1);
   let bestDays = 0;
   for (let month = best; month <= end; month = new Date(month.getFullYear(), month.getMonth() + 1, 1)) {
@@ -43,6 +45,7 @@ function boundaryHomeWindows(roster) {
 }
 
 function presenceWindows(roster) {
+  if (!roster.coverageEnd) return [];
   const coverageEnd = addDays(roster.coverageEnd, 1);
   const windows = [
     ...boundaryHomeWindows(roster),
@@ -188,10 +191,14 @@ function pilotDay(roster, date) {
   if (stays.length) return { label: `${[...new Set(stays.map(window => window.port))].join(' / ')} · in port`, kind: 'trip', detail: stays.map(window => `${window.port} · ${window.dutyCode}\n${formatTime(window.start)} – ${formatTime(window.end)}`).join('\n\n') };
   return { label: 'Location unknown', kind: 'unknown', detail: `${entry.dutyCode}${entry.detail ? ` · ${entry.detail}` : ''}\nThe roster does not resolve this duty to a location.` };
 }
-export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60, range = 'month' } = {}) {
+export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60, range = 'month', period } = {}) {
   const fullRoster = range === 'roster';
-  const first = fullRoster ? dayStart(new Date(Math.min(...rosters.map(roster => roster.coverageStart.getTime())))) : new Date(month.getFullYear(), month.getMonth(), 1);
-  const last = fullRoster ? dayStart(new Date(Math.max(...rosters.map(roster => roster.coverageEnd.getTime())))) : new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  const first = fullRoster
+    ? period?.first ?? dayStart(new Date(Math.min(...rosters.map(roster => +roster.coverageStart))))
+    : new Date(Math.max(+new Date(month.getFullYear(), month.getMonth(), 1), period ? +period.first : -Infinity));
+  const last = fullRoster
+    ? period?.last ?? dayStart(new Date(Math.max(...rosters.map(roster => +roster.coverageEnd))))
+    : new Date(Math.min(+new Date(month.getFullYear(), month.getMonth() + 1, 0), period ? +period.last : Infinity));
   const gridStart = addDays(first, -((first.getDay() + 6) % 7));
   const gridEnd = addDays(last, 6 - ((last.getDay() + 6) % 7));
   const windows = timelineWindows(sharedCalendarWindows(rosters, minOverlapMinutes), rosters);
@@ -245,10 +252,14 @@ export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60, ra
       };
     });
     if (!timelineRows.length) timelineRows.push({ key: 'none', crewIndices: [], crewNames: [], label: 'Together', days: timelineDays });
-    weeks.push({ dates, rows, overlaps, timelineDays, timelineRows });
+    const number = period?.cycleStart ? dayDistance(period.cycleStart, weekStart) / 7 + 1 : weeks.length + 1;
+    weeks.push({ number, dates, rows, overlaps, timelineDays, timelineRows });
   }
   const displayDate = date => date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  return { month: new Date(month.getFullYear(), month.getMonth(), 1), first, last, range, title: fullRoster ? `${displayDate(first)} – ${displayDate(last)}` : first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }), dayCount: dayDistance(first, last) + 1, crews, weeks, details };
+  const dateTitle = fullRoster ? `${displayDate(first)} – ${displayDate(last)}` : first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  return { month: new Date(month.getFullYear(), month.getMonth(), 1), first, last, range,
+    title: period?.label ? `${period.label} · ${dateTitle}` : dateTitle,
+    dayCount: dayDistance(first, last) + 1, crews, weeks, details };
 }
 function escapeHtml(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
@@ -267,11 +278,11 @@ export function renderCalendarMarkup(model, now = new Date()) {
     return `<button type="button" class="calendar-bar ${classes}" data-calendar-detail="${segment.detailId}" style="left: ${segment.offset}%; width: ${segment.width}%" aria-label="${escapeHtml(`${segment.participantLabel} · ${status} · ${detail.subtitle}`)}" title="${escapeHtml(`${segment.participantLabel} · ${status} · ${detail.subtitle}`)}"><span>${escapeHtml(segment.label)}</span></button>`;
   }).join('')}</div></div>`).join('')}</div>`).join('')}</div>`;
   };
-  return `<div class="calendar-lane calendar-day-head" role="row"><span role="columnheader">Pilots / overlaps</span>${days.map(day => `<span role="columnheader">${day}</span>`).join('')}</div>` + model.weeks.map((week, weekIndex) => {
+  return `<div class="calendar-lane calendar-day-head" role="row"><span role="columnheader">Pilots / overlaps</span>${days.map(day => `<span role="columnheader">${day}</span>`).join('')}</div>` + model.weeks.map(week => {
     const todayColumn = week.dates.findIndex(date => dateKey(date) === today);
     return `
     <div class="calendar-week${todayColumn >= 0 ? ' has-today' : ''}" role="rowgroup"${todayColumn >= 0 ? ` style="--today-column: ${todayColumn}"` : ''}>
-      <div class="calendar-lane calendar-dates" role="row"><span role="cell" class="calendar-week-number">Week ${weekIndex + 1}</span>${week.dates.map(date => `<span role="cell" class="${date < model.first || date > model.last ? 'is-outside' : ''}${dateKey(date) === today ? ' is-today' : ''}"><time datetime="${dateKey(date)}"${dateKey(date) === today ? ' aria-current="date" title="Today"' : ''}>${model.range === 'roster' || date.getMonth() !== model.month.getMonth() ? `${date.getDate()} ${date.toLocaleDateString('en-GB', { month: 'short' })}` : date.getDate()}</time></span>`).join('')}</div>
+      <div class="calendar-lane calendar-dates" role="row"><span role="cell" class="calendar-week-number">Week ${week.number}</span>${week.dates.map(date => `<span role="cell" class="${date < model.first || date > model.last ? 'is-outside' : ''}${dateKey(date) === today ? ' is-today' : ''}"><time datetime="${dateKey(date)}"${dateKey(date) === today ? ' aria-current="date" title="Today"' : ''}>${model.range === 'roster' || date.getMonth() !== model.month.getMonth() ? `${date.getDate()} ${date.toLocaleDateString('en-GB', { month: 'short' })}` : date.getDate()}</time></span>`).join('')}</div>
       ${week.rows.map((bars, index) => `<div class="calendar-lane calendar-pilot-lane" role="row"><span class="calendar-row-name" role="rowheader" style="--crew-colour: ${model.crews[index].colour}" title="${escapeHtml(model.crews[index].name)}">${escapeHtml(model.crews[index].name)}</span>${bars.map(bar => button(bar, `calendar-${bar.kind}${bar.outside ? ' is-outside' : ''}`, `--crew-colour: ${model.crews[index].colour}`)).join('')}</div>`).join('')}
       ${timeline(week)}
     </div>`;
