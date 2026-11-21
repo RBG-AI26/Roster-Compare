@@ -65,3 +65,18 @@ test('real gaps stay unavailable and do not generate overlap windows', () => {
   assert.ok(model.weeks[4].rows[0].every(cell => cell.kind === 'unavailable'));
   assert.ok(sharedCalendarWindows([merged, merged]).every(window => window.end <= new Date(2026, 10, 30) || window.start >= new Date(2026, 11, 7)));
 });
+
+test('a gap or a revised boundary duty prevents linking an earlier same-code trip', () => {
+  const parseLong = (rows, pattern = '', issued = '01Nov26 1200') =>
+    parseRosterText('long.txt', `ARMS\nName: TEST PILOT Staff No: 123456\nBase: MEL\n${issued}\nDate Duty Detail\n${rows}\nEND OF REPORT\n${pattern}`);
+  const earlier = parseLong('30/10 F P1 2100\n31/10 S P1\n01/11 U P1',
+    'Pattern: P1\nQF1 MEL/SIN FR 2200 1100 SA 0300\nQF2 SIN/MEL TU 2300 1500 WE 0830');
+  const next = parseLong('02/11 M P1\n03/11 T P1\n04/11 W P1 0700 0900');
+  const revision = parseLong('02/11 M X\n03/11 T P1\n04/11 W P1 0700 0900', '', '02Nov26 1200');
+  const afterGap = parseLong('03/11 T P1\n04/11 W P1 0700 0900');
+
+  assert.deepEqual(mergeRosterPeriods([earlier, afterGap]).unresolvedDuties.map(entry => entry.date.getDate()), [3, 4]);
+  const revised = mergeRosterPeriods([earlier, revision, next]);
+  assert.deepEqual(revised.unresolvedDuties.map(entry => entry.date.getDate()), [3, 4]);
+  assert.ok(!revised.calendar.some(entry => entry.tripContinuation === 'Carry-in'));
+});

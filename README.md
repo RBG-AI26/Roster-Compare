@@ -34,11 +34,11 @@ If you want to run it locally without deploying, serve the repository as a stati
 
 ## Multiple periods for one pilot
 
-Upload each four-week short-haul period normally. Files with the same staff number combine into one pilot, one calendar row and one comparison participant. A unique matching name is used only when a staff number is missing; different staff numbers remain separate. More than five files are allowed when they belong to no more than five pilots. Adding a period preserves that pilot’s domicile, colour and selection. Removing a pilot removes all their periods. Existing saved imports are combined automatically on reload.
+Upload each roster period normally. Files with the same staff number combine into one pilot, one calendar row and one comparison participant. A unique matching name is used only when a staff number is missing; different staff numbers remain separate. More than five files are allowed when they belong to no more than five pilots. Adding a period preserves that pilot’s domicile, colour and selection. Removing a pilot removes all their periods. Existing saved imports are combined automatically on reload.
 
 The calendar retains actual period coverage and real gaps. Overlapping revisions replace whole dates, retaining multiple duties on each winning date. The later printed issue timestamp takes priority; without reliable timestamps, the later import takes priority.
 
-`LD` means defence leave and counts as time at the selected domicile in both short-haul and long-haul rosters.
+When adjacent long-haul rosters for the same pilot list the same trip across their boundary, the app uses the original dated flight sectors and any printed release time from the continuation. The calendar details show **Carry-in** or **Carry-out**. Load the roster containing the original flight sectors to resolve an otherwise uncertain carry-in.
 
 ## Calendar
 
@@ -79,8 +79,9 @@ Duty recognition follows the sibling **Roster Export iCal** app's `public/shared
 | `SIM…` | Simulator; retain the exercise code. Explicit ports, same-port sectors/patterns and airport detail take priority, followed by associated positioning / flight sectors. Without associated travel, use the roster base (not domicile). |
 | `EPE`, `TPA`, `TPAX`, `TNR`, `PMI`, `EBT`, `TRAIN…`, `TRG` | Recognised ground / training duties; require location evidence rather than assuming base |
 | `SR`, `R`, numbered reserve, `RSV`, `RES`, `RESERVE` | Standby / reserve, on call, at the explicit roster port or base |
-| `AL`, `GL`, `HL`, `LSL`, short-haul `LA` | Named leave with the existing assumed-home treatment |
-| `SL`, `UL` | Sick / upline sick leave, recognised but no home presence or free time inferred |
+| `AL`, `GL`, `HL`, `LSL`, `LD`, short-haul `LA` | Named leave with the existing assumed-home treatment |
+| `SL` | Sick leave at the selected domicile |
+| `UL` | Upline sick leave with an unresolved location |
 
 Timed ground duties use valid report/end times, including overnight finishes; matched same-port sector times are a fallback. Credit (including the export analyser's derived 330-minute credit) never supplies elapsed duty time. Missing times create a named calendar marker, not a full-day presence window. Explicit roster ports take priority over decoded defaults. Generic training codes without a reliable port retain a specific location warning.
 

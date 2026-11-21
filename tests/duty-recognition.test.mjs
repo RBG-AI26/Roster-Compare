@@ -120,12 +120,14 @@ test('standby uses base and real overnight times; untimed standby stays a marker
   assert.match(roster.unresolvedDuties[0].uncertainty, /times are missing/);
   assert.ok(cells(roster).some(cell => cell.label.includes('standby')));
 });
-test('sick and upline sick leave are named without claiming home availability', () => {
-  const roster = parse('21/05 T SL\n22/05 F UL');
-  assert.equal(roster.offDays.length, 0);
-  assert.equal(roster.portWindows.length, 0);
-  assert.equal(roster.unresolvedDuties.length, 2);
+test('sick leave uses the chosen domicile and upline sick leave retains uncertainty', () => {
+  const roster = parse('21/05 T SL\n22/05 F UL', '', 'MEL');
+  roster.domicile = 'ADL';
+  assert.deepEqual(roster.offDays.map(entry => entry.dutyCode), ['SL']);
+  assert.deepEqual(roster.unresolvedDuties.map(entry => entry.dutyCode), ['UL']);
+  assert.ok(cells(roster).some(cell => cell.label === 'ADL · home' && cell.detail.includes('Sick leave')));
   assert.ok(cells(roster).some(cell => cell.kind === 'leave' && cell.label.includes('Upline sick')));
+  assert.deepEqual(sharedCalendarWindows([roster, roster]).map(window => window.port), ['ADL']);
 });
 test('a day-off marker cannot create home presence alongside a training duty', () => {
   const roster = parse('21/05 T A\n21/05 T EPCSY 0800 1200');

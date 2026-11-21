@@ -151,6 +151,8 @@ function pilotDay(roster, date) {
   const entries = roster.calendar.filter(item => dateKey(item.date) === dateKey(date));
   const entry = entries[0];
   if (!entry) return { label: 'No roster', kind: 'unavailable', detail: 'No roster entry is available for this date.' };
+  const continuation = entries.filter(item => item.tripContinuation).map(item => `${item.dutyCode} · ${item.tripContinuation}`).join(' / ');
+  const continuationDetail = continuation ? `${continuation}\n\n` : '';
   const ground = roster.calendar.filter(item => (entry.sourcePeriod == null || item.sourcePeriod === entry.sourcePeriod) && item.dutyInfo && !item.dutyInfo.assumeHome && (entries.includes(item) || (item.dutyInfo.start < end && item.dutyInfo.end > start)));
   const available = boundaryHomeWindows(roster).filter(window => window.start < end && window.end > start);
   const clock = time => time.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', hour12:false});
@@ -164,7 +166,7 @@ function pilotDay(roster, date) {
       info.start ? `${formatTime(info.start)} – ${formatTime(info.end)} · ${info.timingSource}` : null,
       ...(info.issues || []), info.kind === 'reserve' ? 'On call; this does not imply free time.' : info.kind !== 'leave' ? 'On duty; this does not imply free time.' : null].filter(Boolean).join('\n');
   };
-  const allLegs = (roster.trips || []).flatMap(trip => trip.legs).filter(leg => (entry.sourcePeriod == null || leg.sourcePeriod === entry.sourcePeriod) && leg.departureDateTime < end && leg.arrivalDateTime > start);
+  const allLegs = (roster.trips || []).flatMap(trip => trip.legs).filter(leg => (entry.sourcePeriod == null || leg.sourcePeriods?.includes(entry.sourcePeriod)) && leg.departureDateTime < end && leg.arrivalDateTime > start);
   const legs = allLegs.filter(leg => leg.origin !== leg.destination);
   if (legs.length) {
     const route = [legs[0].origin];
@@ -172,7 +174,7 @@ function pilotDay(roster, date) {
       if (route[route.length - 1] !== leg.origin) route.push(leg.origin);
       route.push(leg.destination);
     }
-    return { label: route.join(' → ') + (ground.length ? ` · ${ground.map(item => item.dutyInfo.label).join(' / ')}` : '') + availabilityLabel, kind: 'trip', detail: legs.map(leg => `${leg.service || 'Flight'}: ${leg.origin} → ${leg.destination}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}`).concat(ground.map(groundDetail)).join('\n\n') + availabilityDetail };
+    return { label: route.join(' → ') + (ground.length ? ` · ${ground.map(item => item.dutyInfo.label).join(' / ')}` : '') + availabilityLabel, kind: 'trip', detail: continuationDetail + legs.map(leg => `${leg.service || 'Flight'}: ${leg.origin} → ${leg.destination}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}`).concat(ground.map(groundDetail)).join('\n\n') + availabilityDetail };
   }
   if (ground.length) return {
     label: ground.map(item => `${item.dutyInfo.port || (item.dutyInfo.kind === 'leave' ? '' : 'Port not supplied')}${item.dutyInfo.port || item.dutyInfo.kind !== 'leave' ? ' · ' : ''}${item.dutyInfo.label}`).join(' / ') + (offEntry ? ` / ${homePort(roster) || 'Home'} · home` : '') + availabilityLabel,
@@ -180,15 +182,15 @@ function pilotDay(roster, date) {
     detail: ground.map(groundDetail).join('\n\n') + homeDetail + availabilityDetail,
   };
   if (allLegs.length) return { label: [...new Set(allLegs.map(leg => `${leg.origin} · ${leg.service || 'ground duty'}`))].join(' / '), kind: 'ground',
-    detail: allLegs.map(leg => `${leg.service || 'Ground duty'} · ${leg.origin}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}\nOn duty; this does not imply free time.`).join('\n\n') };
+    detail: continuationDetail + allLegs.map(leg => `${leg.service || 'Ground duty'} · ${leg.origin}\n${formatTime(leg.departureDateTime)} – ${formatTime(leg.arrivalDateTime)}\nOn duty; this does not imply free time.`).join('\n\n') };
   const offDay = roster.offDays.some(item => dateKey(item.date) === dateKey(date));
   const home = homePort(roster);
   if (offDay) return { label: home ? `${home} · home` : roster.requiresDomicile ? 'Day off · choose domicile' : 'Day off · base unknown', kind: 'home', detail: `${entry.dutyInfo?.kind === 'leave' ? entry.dutyInfo.label : `${entry.dutyCode} · day off`}${home ? `\n${home}${homeDetail || `\n${formatTime(start)} – ${formatTime(end)}`}` : '\nHome location is not set.'}` };
   const reserve = (roster.reserveDays || []).some(item => dateKey(item.date) === dateKey(date));
   if (reserve) return { label: `${roster.base || 'Base unknown'} · reserve`, kind: 'reserve', detail: `${entry.dutyCode} · reserve at base${entry.report && entry.end ? `\n${entry.report} – ${entry.end} roster local time` : '\nReserve times are unavailable.'}\nOn call; this does not imply free time.` };
-  if (available.length) return { label: `${entry.dutyCode}${availabilityLabel}`, kind: 'home', detail: `${entry.dutyCode}${availabilityDetail}` };
+  if (available.length) return { label: `${entry.dutyCode}${availabilityLabel}`, kind: 'home', detail: `${continuationDetail}${entry.dutyCode}${availabilityDetail}` };
   const stays = roster.portWindows.filter(window => window.start < end && window.end > start);
-  if (stays.length) return { label: `${[...new Set(stays.map(window => window.port))].join(' / ')} · in port`, kind: 'trip', detail: stays.map(window => `${window.port} · ${window.dutyCode}\n${formatTime(window.start)} – ${formatTime(window.end)}`).join('\n\n') };
+  if (stays.length) return { label: `${[...new Set(stays.map(window => window.port))].join(' / ')} · in port`, kind: 'trip', detail: continuationDetail + stays.map(window => `${window.port} · ${window.dutyCode}\n${formatTime(window.start)} – ${formatTime(window.end)}`).join('\n\n') };
   return { label: 'Location unknown', kind: 'unknown', detail: `${entry.dutyCode}${entry.detail ? ` · ${entry.detail}` : ''}\nThe roster does not resolve this duty to a location.` };
 }
 export function buildRosterCalendar(rosters, month, { minOverlapMinutes = 60, range = 'month', period } = {}) {

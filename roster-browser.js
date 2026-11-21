@@ -1,6 +1,6 @@
 // Duty meanings are aligned with Roster Export iCal/public/shared/roster-parser.mjs
 // and roster-analysis.mjs. Recognition never supplies missing clock times.
-const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "RX", "BL", "AL", "GL", "HL", "LSL", "LD"]);
+const LONG_HAUL_OFF_DUTY_CODES = new Set(["A", "X", "RX", "BL", "AL", "GL", "HL", "LSL", "LD", "SL"]);
 const LEAVE_LABELS = { LD: "Defence leave", AL: "Annual leave", GL: "Golden leave", HL: "High priority leave", LSL: "Long service leave", LA: "Leave", SL: "Sick leave", UL: "Upline sick leave" };
 const EMERGENCY_PORTS = { SY: "SYD", ML: "MEL", BN: "BNE", PH: "PER" };
 const KNOWN_PORTS = new Set(["ADL", "MEL", "SYD", "BNE", "PER", "DRW", "HBA", "CBR", "OOL", "CNS", "AKL", "WLG", "CHC", "SIN", "HKG", "NRT", "HND", "LAX", "LHR", "DFW", "JNB", "SCL", "DPS", "BKK", "NAN", "HTI", "MCY", "TSV", "NTL"]);
@@ -192,7 +192,7 @@ function classifyNonFlyingDuty(entry, shortHaul = entry.rosterType === "short-ha
   if (shortHaul && code === "AV") return { kind: "off", label: "AV · day off", assumeHome: true };
   if (shortHaul && code === "MS") return { kind: "base_duty", label: "MS · duty at base" };
   if (shortHaul && /^EP\d+$/.test(code)) return { kind: "training", label: `EPC · emergency procedures (${code})`, shortHaulEpc: true };
-  if (LEAVE_LABELS[code]) return { kind: "leave", label: `${code} · ${LEAVE_LABELS[code]}`, assumeHome: !["SL", "UL"].includes(code) };
+  if (LEAVE_LABELS[code]) return { kind: "leave", label: `${code} · ${LEAVE_LABELS[code]}`, assumeHome: code !== "UL" };
   if (SHORT_HAUL_RESERVE_DUTY_REGEX.test(code)) return { kind: "reserve", label: code === "SR" ? "SR · standby" : `${code} · reserve` };
   if (code === "TSPD") return { kind: "training", label: "TSPD", rulePort: "MEL", ruleSource: "Roster Export TSPD Melbourne rule" };
   if (/\bSIM[A-Z0-9]*\b/.test(text)) {
@@ -402,20 +402,75 @@ export function findRosterPilotIndex(rosters, candidate) {
   return matches.length === 1 && (!staff || !matches[0].roster.staffNumber) ? matches[0].index : -1;
 }
 
-export function mergeRosterPeriods(periods) {
-  if (!periods.length) throw new Error("No roster periods supplied.");
-  if (periods.length === 1) return periods[0];
-  const staff = new Set(periods.map(period => period.staffNumber).filter(Boolean));
-  if (staff.size > 1) throw new Error("Roster periods belong to different staff numbers.");
+function rosterDateOwners(periods) {
   const owners = new Map();
-  const key = date => formatSortableLocalDate(date);
   // A revised file replaces complete dates, including every duty on that date.
   // Reliable printed issue times win; otherwise the latest import wins.
   periods.forEach((period, index) => period.calendar.forEach(entry => {
-    const previous = owners.get(key(entry.date));
+    const date = formatSortableLocalDate(entry.date);
+    const previous = owners.get(date);
     const previousTime = previous == null ? null : periods[previous].generatedAt;
-    if (previous == null || !previousTime || !period.generatedAt || period.generatedAt >= previousTime) owners.set(key(entry.date), index);
+    if (previous == null || !previousTime || !period.generatedAt || period.generatedAt >= previousTime) owners.set(date, index);
   }));
+  return owners;
+}
+
+function resolveLongHaulCarryovers(periods) {
+  const rebuilt = new Map();
+  const owners = rosterDateOwners(periods);
+  const linked = new Map();
+  const boundaries = [...new Set(periods.map(period => +period.coverageStart))].sort((a, b) => a - b);
+  for (const boundary of boundaries) {
+    const date = new Date(boundary);
+    const priorDate = addDays(date, -1);
+    const priorIndex = owners.get(formatSortableLocalDate(priorDate));
+    const nextIndex = owners.get(formatSortableLocalDate(date));
+    const prior = periods[priorIndex], next = periods[nextIndex];
+    if (!(prior?.patterns instanceof Map) || !(next?.patterns instanceof Map) ||
+        +prior.coverageEnd !== +priorDate || +next.coverageStart !== boundary) continue;
+
+    const incomingCodes = new Set(next.calendar.filter(entry => +entry.date === boundary).map(entry => entry.dutyCode));
+    for (const entry of prior.calendar.filter(row => +row.date === +priorDate && incomingCodes.has(row.dutyCode))) {
+      const crossesBoundary = trip => trip.code === entry.dutyCode &&
+        trip.anchorDate <= priorDate && trip.legs.at(-1).arrivalDateTime > date;
+      let trip = [...(linked.get(prior) || [])].find(crossesBoundary);
+      if (!trip) {
+        const candidates = prior.trips.filter(candidate => crossesBoundary(candidate) &&
+          owners.get(formatSortableLocalDate(candidate.anchorDate)) === priorIndex &&
+          candidate.legs[0].departureDateTime < addDays(candidate.anchorDate, 2));
+        if (candidates.length !== 1) continue;
+        trip = { ...candidates[0], dutyTimes: [] };
+      }
+      const lastDayEnd = addDays(trip.legs.at(-1).arrivalDateTime, 1);
+      for (const [period, index] of [[prior, priorIndex], [next, nextIndex]]) {
+        if (!linked.has(period)) linked.set(period, new Set());
+        if (linked.get(period).has(trip)) continue;
+        linked.get(period).add(trip);
+        trip.dutyTimes.push(...period.calendar.filter(row => row.dutyCode === trip.code &&
+          row.date >= trip.anchorDate && row.date < lastDayEnd &&
+          owners.get(formatSortableLocalDate(row.date)) === index));
+      }
+    }
+  }
+  for (const [period, trips] of linked) {
+    const calendar = period.calendar.map(entry => ({ ...entry, dutyInfo: undefined, uncertainty: undefined, tripContinuation: undefined }));
+    const analysed = analyseLongHaulRoster({ ...period, calendar }, [...trips]);
+    rebuilt.set(period, { ...period, ...analysed, domicile: period.domicile });
+  }
+  return rebuilt;
+}
+
+export function mergeRosterPeriods(periods, { carryoverContext = periods } = {}) {
+  if (!periods.length) throw new Error("No roster periods supplied.");
+  const staff = new Set([...periods, ...carryoverContext].map(period => period.staffNumber).filter(Boolean));
+  if (staff.size > 1) throw new Error("Roster periods belong to different staff numbers.");
+  if (carryoverContext.length > 1) {
+    const resolved = resolveLongHaulCarryovers(carryoverContext);
+    periods = periods.map(period => resolved.get(period) || period);
+  }
+  if (periods.length === 1) return periods[0];
+  const owners = rosterDateOwners(periods);
+  const key = date => formatSortableLocalDate(date);
   const owned = (date, index) => owners.get(key(date)) === index;
   const clip = (window, index) => {
     const pieces = [];
@@ -439,13 +494,29 @@ export function mergeRosterPeriods(periods) {
     offDays: periods.flatMap((period, index) => period.offDays.filter(entry => owned(entry.date, index)).map(entry => ({ ...entry, homeWindows: offDayWindows(entry).flatMap(window => clip(window, index)) }))),
     reserveDays: periods.flatMap((period, index) => period.reserveDays.filter(entry => owned(entry.date, index))),
     unresolvedDuties: periods.flatMap((period, index) => period.unresolvedDuties.filter(entry => owned(entry.date, index))),
-    trips: periods.flatMap((period, index) => period.trips.map(trip => ({ ...trip, legs: trip.legs.filter(leg => {
-      if (owned(leg.departureDateTime, index) || owned(leg.arrivalDateTime, index)) return true;
-      return clip({ start: leg.departureDateTime, end: leg.arrivalDateTime }, index).length > 0;
-    }).map(leg => ({ ...leg, sourcePeriod: index })) })).filter(trip => trip.legs.length)),
+    trips: mergeRosterTrips(periods, owned, clip),
   };
   for (const property of ["portWindows", "homeBoundaryWindows", "dutyBlocks"]) merged[property] = periods.flatMap((period, index) => (period[property] || []).flatMap(window => clip(window, index)));
   return merged;
+}
+
+function mergeRosterTrips(periods, owned, clip) {
+  const occurrences = new Map();
+  periods.forEach((period, index) => {
+    for (const trip of period.trips) {
+      if (!occurrences.has(trip)) occurrences.set(trip, new Map());
+      const legs = occurrences.get(trip);
+      for (const leg of trip.legs) {
+        const { departureDateTime: start, arrivalDateTime: end } = leg;
+        if (!owned(start, index) && !owned(end, index) && !clip({ start, end }, index).length) continue;
+        if (!legs.has(leg)) legs.set(leg, { ...leg, sourcePeriods: [] });
+        legs.get(leg).sourcePeriods.push(index);
+      }
+    }
+  });
+  return [...occurrences].map(([trip, legs]) => ({
+    ...trip, legs: trip.legs.filter(leg => legs.has(leg)).map(leg => legs.get(leg)),
+  })).filter(trip => trip.legs.length);
 }
 
 function extractIssueTime(text) {
@@ -466,30 +537,19 @@ function parseLongHaulRoster(fileName, text, metadata) {
     throw new Error("No calendar entries could be parsed from the roster.");
   }
 
-  const flightData = buildDutyWindows(calendar, patterns);
+  return analyseLongHaulRoster({ ...metadata, fileName, calendar, patterns, preview: text.split("\n").slice(0, 20).join("\n") });
+}
+
+function analyseLongHaulRoster(roster, carryovers = []) {
+  const { calendar, patterns, base } = roster;
+  const flightData = buildDutyWindows(calendar, patterns, carryovers);
   const { trips } = flightData;
-  const nonFlying = resolveNonFlyingDuties(calendar, patterns, trips, metadata.base);
+  const nonFlying = resolveNonFlyingDuties(calendar, patterns, trips, base);
   const offDays = collectOffDays(calendar, [...flightData.portWindows, ...nonFlying.portWindows, ...trips.flatMap(trip => trip.legs.map(leg => ({ start: leg.departureDateTime, end: leg.arrivalDateTime })))]);
   const reserveDays = calendar.filter(entry => entry.dutyInfo?.kind === "reserve");
   const portWindows = excludeGroundDutyFromLayovers([...flightData.portWindows, ...nonFlying.portWindows]);
   const unresolvedDuties = [...flightData.unresolvedDuties, ...nonFlying.unresolvedDuties];
-
-  return buildRosterRecord({
-    crewName: metadata.crewName,
-    staffNumber: metadata.staffNumber,
-    base: metadata.base,
-    bidPeriod: metadata.bidPeriod,
-    source: metadata.source,
-    fileName,
-    calendar,
-    patterns,
-    offDays,
-    reserveDays,
-    trips,
-    portWindows,
-    unresolvedDuties,
-    preview: text.split("\n").slice(0, 20).join("\n"),
-  });
+  return buildRosterRecord({ ...roster, offDays, reserveDays, trips, portWindows, unresolvedDuties });
 }
 
 function parseShortHaulRoster(fileName, text, metadata) {
@@ -1313,47 +1373,68 @@ function parseFlightLine(line) {
   };
 }
 
-function buildDutyWindows(calendar, patterns) {
+function buildDutyWindows(calendar, patterns, carryovers) {
   const portWindows = [];
   const unresolvedDuties = [];
   const trips = [];
+  const activeTrips = new Map();
+  const continuations = new Set();
+  const coverageStart = calendar[0].date;
+  const lastDate = calendar.at(-1).date;
+  const coverageEnd = addDays(lastDate, 1);
+  const lastDayCodes = new Set(calendar.filter(entry => +entry.date === +lastDate).map(entry => entry.dutyCode));
 
-  const seenThrough = new Map();
   for (const entry of calendar) {
     const info = classifyNonFlyingDuty(entry);
     if (info?.assumeHome || info?.kind === "leave" || info?.kind === "reserve") continue;
-    const pattern = patterns.get(entry.dutyCode);
-    if (!pattern || !pattern.flights.length) {
-      if (!info) unresolvedDuties.push({ ...entry, uncertainty: "No matching flight pattern or recognised non-flying duty." });
-      continue;
+    let trip = activeTrips.get(entry.dutyCode);
+    if (!trip || trip.legs.at(-1).arrivalDateTime < entry.date) {
+      trip = carryovers.find(candidate => candidate.code === entry.dutyCode &&
+        candidate.anchorDate <= entry.date && candidate.legs.at(-1).arrivalDateTime >= entry.date);
+      if (!trip) {
+        const pattern = patterns.get(entry.dutyCode);
+        if (!pattern?.flights.length) {
+          if (!info) unresolvedDuties.push({ ...entry, uncertainty: "No matching flight pattern or recognised non-flying duty." });
+          continue;
+        }
+        const legs = instantiatePattern(entry.date, pattern).map(({ flight, departureDateTime, arrivalDateTime }) => ({
+          ...flight, departureDateTime, arrivalDateTime,
+        }));
+        trip = { code: pattern.code, anchorDate: entry.date, legs };
+      }
+      activeTrips.set(trip.code, trip);
+      trips.push(trip);
     }
-    if (seenThrough.get(entry.dutyCode) >= entry.date.getTime()) continue;
-    const instantiated = instantiatePattern(entry.date, pattern);
-    if (!instantiated.length) { unresolvedDuties.push(entry); continue; }
-    seenThrough.set(entry.dutyCode, instantiated.at(-1).arrivalDateTime.getTime());
-    trips.push({ code: pattern.code, anchorDate: entry.date, legs: instantiated.map(leg => ({ ...leg.flight, departureDateTime: leg.departureDateTime, arrivalDateTime: leg.arrivalDateTime })) });
+    if (trip.anchorDate < coverageStart) entry.tripContinuation = "Carry-in";
+    else if (trip.legs.at(-1).arrivalDateTime > coverageEnd && lastDayCodes.has(trip.code)) {
+      entry.tripContinuation = "Carry-out";
+    }
+    if (entry.tripContinuation) continuations.add(trip);
+  }
 
-    instantiated.forEach((leg, index) => {
-      const { departureDateTime, arrivalDateTime, flight } = leg;
-      if (flight.origin === flight.destination && !calendar.some(row => classifyNonFlyingDuty(row) && row.dutyCode === flight.service && formatSortableLocalDate(row.date) === formatSortableLocalDate(departureDateTime))) {
-        portWindows.push({ start: departureDateTime, end: arrivalDateTime, port: flight.origin, dutyCode: `${flight.service} (on duty)`, matchType: "ground_duty", onDuty: true, dutyLabel: flight.service });
+  for (const trip of trips) {
+    // Sectors may date outside this file. Only the carryover presence in the
+    // file's own coverage contributes to its port matches.
+    const addWindow = window => {
+      if (continuations.has(trip)) {
+        window.start = new Date(Math.max(window.start, coverageStart));
+        window.end = new Date(Math.min(window.end, coverageEnd));
+        if (window.end <= window.start) return;
+      }
+      portWindows.push(window);
+    };
+    trip.legs.forEach((leg, index) => {
+      const { departureDateTime, arrivalDateTime, origin, destination, service } = leg;
+      if (origin === destination && !calendar.some(row => classifyNonFlyingDuty(row) && row.dutyCode === service && formatSortableLocalDate(row.date) === formatSortableLocalDate(departureDateTime))) {
+        addWindow({ start: departureDateTime, end: arrivalDateTime, port: origin, dutyCode: `${service} (on duty)`, matchType: "ground_duty", onDuty: true, dutyLabel: service });
       }
 
-      if (index + 1 < instantiated.length) {
-        const nextLeg = instantiated[index + 1];
-        if (flight.destination === nextLeg.flight.origin && nextLeg.departureDateTime > arrivalDateTime) {
-          portWindows.push({
-            start: arrivalDateTime,
-            end: nextLeg.departureDateTime,
-            port: flight.destination,
-            dutyCode: pattern.code,
-            matchType: "in_port",
-          });
-        }
+      const nextLeg = trip.legs[index + 1];
+      if (nextLeg && destination === nextLeg.origin && nextLeg.departureDateTime > arrivalDateTime) {
+        addWindow({ start: arrivalDateTime, end: nextLeg.departureDateTime, port: destination, dutyCode: trip.code, matchType: "in_port" });
       }
     });
   }
-
   return { portWindows, unresolvedDuties, trips };
 }
 

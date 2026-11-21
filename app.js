@@ -1,6 +1,6 @@
-import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261121-bid1";
-import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261121-bid1";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261121-bid1";
+import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261121-carry1";
+import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261121-carry1";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261121-carry1";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const THEME_STORAGE_KEY = "roster-compare-theme";
@@ -480,7 +480,9 @@ function rosterInBidPeriod(roster, period) {
     ...roster.parsed, bidPeriod: null, haul: null, coverageStart: null, coverageEnd: null,
     calendar: [], trips: [], offDays: [], reserveDays: [], portWindows: [], homeBoundaryWindows: [], unresolvedDuties: [],
   };
-  const parsed = mergeRosterPeriods(files.map(file => file.parsed));
+  const parsed = mergeRosterPeriods(files.map(file => file.parsed), {
+    carryoverContext: roster.files.map(file => file.parsed),
+  });
   return { ...parsed, domicile: roster.domicile, requiresDomicile: !roster.domicile, colour: roster.parsed.colour };
 }
 

@@ -277,6 +277,46 @@ test('Full roster switches between eight-week bid periods and aligns both short-
   assert.match(reopened.elements.get('calendar-month').textContent, /^BP377/);
 });
 
+test('adjacent bid-period views share one trip and retain its original sectors and printed release', async () => {
+  const ui = setup();
+  const tripCode = 'P100';
+  const formerStart = new Date(2026, 8, 7);
+  const laterStart = new Date(2026, 10, 2);
+  const original = longPeriodFile({ bid: '377', start: formerStart });
+  const continuation = longPeriodFile({ bid: '378', start: laterStart });
+  const originalText = (await original.text()).replace('30/10 F A', `30/10 F ${tripCode} 2100`)
+    .replace('31/10 S A', `31/10 S ${tripCode}`).replace('01/11 U A', `01/11 U ${tripCode}`) +
+    `\nPattern: ${tripCode}\nQF1 MEL/SIN FR 2200 1100 SA 0300\nQF2 SIN/MEL TU 2300 1500 WE 0830`;
+  const continuationText = (await continuation.text()).replace('02/11 M A', `02/11 M ${tripCode}`)
+    .replace('03/11 T A', `03/11 T ${tripCode}`).replace('04/11 W A', `04/11 W ${tripCode} 0700 0900`)
+    .replace('21/11 S A', '21/11 S SL');
+  const other = longPeriodFile({ bid: '378', start: laterStart });
+  const otherText = (await other.text()).replace('100000', '200000');
+  await ui.add([{ ...continuation, text: async () => continuationText }, { ...other, text: async () => otherText }]);
+  ui.domicile(0, 'ADL');
+  assert.equal(vm.runInContext('periodRosters[0].unresolvedDuties.length', ui.context), 3);
+  await ui.add([{ ...original, text: async () => originalText }]);
+
+  const picker = ui.elements.get('calendar-bid-period');
+  picker.value = '378:2026-11-02';
+  picker.events.change();
+  assert.equal(vm.runInContext('periodRosters[0].unresolvedDuties.length', ui.context), 0);
+  assert.equal(vm.runInContext('loadedRosters[0].parsed.trips.length', ui.context), 1);
+  assert.equal(vm.runInContext('periodRosters[0].offDays.find(day => day.dutyCode === "SL").date.getDate()', ui.context), 21);
+  assert.match(ui.elements.get('summary-row').innerHTML, /Domicile: ADL/);
+  assert.ok(vm.runInContext('calendarModel.details.some(detail => detail.text.includes("P100 · Carry-in"))', ui.context));
+  assert.ok(vm.runInContext('periodRosters[0].homeBoundaryWindows.some(window => window.start.getDate() === 4 && window.start.getHours() === 9)', ui.context));
+  assert.ok(vm.runInContext('periodRosters[0].portWindows.some(window => window.port === "SIN" && window.start.getDate() === 2 && window.start.getHours() === 0)', ui.context));
+
+  picker.value = '377:2026-09-07';
+  picker.events.change();
+  assert.ok(vm.runInContext('calendarModel.details.some(detail => detail.text.includes("P100 · Carry-out"))', ui.context));
+  assert.ok(vm.runInContext('periodRosters[0].portWindows.every(window => window.end <= new Date(2026, 10, 2))', ui.context));
+
+  const restored = setup(JSON.parse(ui.store.get(storageKey)));
+  assert.ok(vm.runInContext('calendarModel.details.some(detail => detail.text.includes("P100 · Carry-out"))', restored.context));
+});
+
 test('a short-haul second half shows weeks 5–8 and keeps those numbers in Month view', async () => {
   const ui = setup();
   const start = new Date(2027, 0, 25);
