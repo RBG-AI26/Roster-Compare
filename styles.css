@@ -43,7 +43,7 @@ body {
 }
 
 .shell {
-  width: min(1180px, calc(100% - 32px));
+  width: calc(100% - 2 * clamp(16px, 2vw, 48px));
   margin: 0 auto;
   padding: 40px 0 72px;
 }
@@ -336,7 +336,7 @@ tbody tr.home-match-row {
 
 @media (max-width: 860px) {
   .shell {
-    width: min(100% - 20px, 1180px);
+    width: calc(100% - 20px);
     padding: 28px 0 48px;
   }
 
