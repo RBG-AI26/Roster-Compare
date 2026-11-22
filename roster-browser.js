@@ -990,8 +990,8 @@ function resolveShortHaulCalendarStart(entries, text, blocks, generationDate) {
   if (!entries.length) return generationDate;
   const fail = () => { throw new Error("Cannot determine the short-haul roster period reliably. Check the printed dates and weekdays."); };
   const printed = text.match(/(\d{1,2}\s*[A-Za-z]{3}\s*\d{2,4})\s*[-–]\s*(\d{1,2}\s*[A-Za-z]{3}\s*\d{2,4})/);
-  const available = text.match(/Available Date\/Time this.*?:\s*(\d{2}[A-Za-z]{3}\d{2})/i);
-  const explicit = printed ? parseShortHaulPrintedDate(printed[1]) : available ? parseShortHaulPrintedDate(available[1]) : null;
+  // The report's Availability timestamps describe publication, and can fall inside the bid period.
+  const explicit = printed ? parseShortHaulPrintedDate(printed[1]) : null;
   if (explicit) {
     if (explicit.getDate() !== entries[0].dayOfMonth || !shortHaulWeekdaysMatch(entries, explicit)) return fail();
     return explicit;

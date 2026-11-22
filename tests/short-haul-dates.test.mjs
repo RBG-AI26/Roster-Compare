@@ -41,6 +41,16 @@ test('leave-only roster uses weekday checks around its report date', () => {
   assert.equal(dateKey(roster.coverageStart),'2026-11-30');
   assert.equal(dateKey(roster.coverageEnd),'2026-12-27');
 });
+test('publication timestamps do not override the calendar and dated patterns', () => {
+  const text = shortHaul({ start: new Date(2026, 10, 2), generated: '22 Nov 2026' })
+    .replace('Global Preferences', 'Global Preferences\nAvailable Date/Time this (next) BP       : 04Nov26 0744 (30Nov26 0000)');
+  const roster = parseRosterText('webcis.txt', text);
+  assert.equal(dateKey(roster.coverageStart), '2026-11-02');
+  assert.equal(dateKey(roster.coverageEnd), '2026-11-29');
+  assert.equal(roster.patterns.length, 1);
+  assert.equal(roster.unresolvedDuties.length, 0);
+});
+
 test('inconsistent weekday evidence is rejected instead of silently producing wrong dates', () => {
   const text = shortHaul().replace('30 Mon','30 Tue');
   assert.throws(() => parseRosterText('webcis.txt',text), /Cannot determine the short-haul roster period reliably/);
