@@ -1,6 +1,6 @@
-import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261121-carry1";
-import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261121-carry1";
-import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261121-carry1";
+import { connectionToken, knownEmailPeriods, fetchEmailRosters, prepareEmailFiles } from "./email-rosters.js?v=20261122-crew1";
+import { compareRosterGroup, parseRosterText, findRosterPilotIndex, mergeRosterPeriods } from "./roster-browser.js?v=20261122-crew1";
+import { CREW_COLOURS, buildRosterCalendar, calendarBounds, initialCalendarMonth, dateKey, renderCalendarMarkup } from "./roster-calendar.js?v=20261122-crew1";
 
 const STORAGE_KEY = "roster-compare-state-v2";
 const THEME_STORAGE_KEY = "roster-compare-theme";
@@ -31,8 +31,10 @@ const emailCodeInput = document.getElementById("email-connection-code");
 const emailConnectButton = document.getElementById("email-connect-button");
 const emailRefreshButton = document.getElementById("email-refresh-button");
 const emailConnectionList = document.getElementById("email-connections");
+const sharedCrewList = document.getElementById("shared-crew");
 const emailStatus = document.getElementById("email-status");
 let emailConnections = [];
+const excludedSharedCrew = new Set();
 let emailBusy = false;
 
 const calendarGrid = document.getElementById("calendar-grid");
@@ -224,6 +226,7 @@ crewList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-remove-index]");
   if (!button || isProcessing || emailBusy) return;
   const removed = loadedRosters.splice(Number(button.dataset.removeIndex), 1)[0];
+  if (removed?.parsed.staffNumber) excludedSharedCrew.add(removed.parsed.staffNumber);
   emailConnections = emailConnections.filter(connection => connection.staffNumber !== removed?.parsed.staffNumber);
   renderEmailConnections();
   prepareComparisons();
@@ -265,6 +268,7 @@ clearStorageButton.addEventListener("click", () => {
   clearPersistedState();
   loadedRosters = [];
   emailConnections = [];
+  excludedSharedCrew.clear();
   emailCodeInput.value = "";
   emailStatus.textContent = "";
   renderEmailConnections();
@@ -327,6 +331,7 @@ async function addRosterFiles(files) {
   fileInput.value = "";
   if (added) prepareComparisons();
   renderCrewList();
+  renderEmailConnections();
   rerunComparison();
   persistState();
   uploadStatus.textContent = [`${added} roster file${added === 1 ? "" : "s"} added.`, ...messages].join(" ");
@@ -666,6 +671,7 @@ function persistState() {
         preferredBidPeriod,
         minOverlapMinutes: Number(minOverlapInput.value || 60),
         emailConnections: emailConnections.map(({ code, staffNumber, name, checkedAtUtc, updatedAtUtc }) => ({ code, staffNumber, name, checkedAtUtc, updatedAtUtc })),
+        excludedSharedCrew: [...excludedSharedCrew],
         currentInputs: {
           rosters: loadedRosters.map(({ files, fileName, text, selected, domicile, parsed }) => ({ fileName, text, files: files.map(({ fileName, text, emailSource }) => ({ fileName, text, ...(emailSource ? { emailSource } : {}) })), selected, domicile, colour: parsed.colour })),
         },
@@ -693,6 +699,9 @@ function restorePersistedState() {
   emailConnections = Array.isArray(savedState.emailConnections) ? savedState.emailConnections.slice(0, MAX_ROSTERS).filter(connection => {
     try { connectionToken(connection.code); return /^\d{4,}$/.test(connection.staffNumber || ""); } catch { return false; }
   }) : [];
+  for (const staffNumber of Array.isArray(savedState.excludedSharedCrew) ? savedState.excludedSharedCrew : []) {
+    if (typeof staffNumber === "string" && /^\d{4,}$/.test(staffNumber)) excludedSharedCrew.add(staffNumber);
+  }
   renderEmailConnections();
   const minOverlapMinutes =
     savedState.minOverlapMinutes != null
@@ -798,6 +807,53 @@ function renderEmailConnections() {
       <span>${escapeHtml(connection.updatedAtUtc ? `Roster updated ${new Date(connection.updatedAtUtc).toLocaleString("en-GB")}` : "No emailed roster loaded yet")}</span></div>
       <button type="button" class="secondary-button" data-disconnect-email="${index}" ${emailBusy || isProcessing ? "disabled" : ""}>Disconnect</button>
     </div>`).join("");
+  const available = [...availableSharedCrew().values()].filter(pilot => !hasLoadedPilot(pilot.staffNumber));
+  sharedCrewList.hidden = !available.length;
+  sharedCrewList.innerHTML = available.map(pilot => `
+    <div class="email-connection">
+      <strong>${escapeHtml(pilot.name || `Staff ${pilot.staffNumber}`)}</strong>
+      <button type="button" class="secondary-button" data-add-shared-crew="${pilot.staffNumber}" ${emailBusy || isProcessing || !hasRoomForSharedPilot() ? "disabled" : ""}>Add roster</button>
+    </div>`).join("");
+}
+
+function availableSharedCrew() {
+  const available = new Map();
+  const connected = new Set(emailConnections.map(connection => connection.staffNumber));
+  for (const connection of emailConnections) {
+    for (const pilot of connection.crew || []) {
+      if (!connected.has(pilot.staffNumber) && !available.has(pilot.staffNumber)) available.set(pilot.staffNumber, { ...pilot, connection });
+    }
+  }
+  return available;
+}
+
+function hasLoadedPilot(staffNumber) {
+  return loadedRosters.some(roster => roster.parsed.staffNumber === staffNumber);
+}
+
+function hasRoomForSharedPilot() {
+  const pending = emailConnections.filter(connection => !hasLoadedPilot(connection.staffNumber)).length;
+  return loadedRosters.length + pending < MAX_ROSTERS;
+}
+
+async function syncSharedPilot(pilot) {
+  const data = await fetchEmailRosters({ ...pilot.connection, crewStaffNumber: pilot.staffNumber }, knownEmailPeriods(loadedRosters, pilot.staffNumber));
+  return { changed: applyEmailRosterData(data), message: data.message || (data.unavailable.length ? "Some periods are still becoming available; refresh shortly." : "") };
+}
+
+async function refreshSharedCrew(messages) {
+  let changed = 0;
+  for (const pilot of availableSharedCrew().values()) {
+    if (!hasLoadedPilot(pilot.staffNumber) && (excludedSharedCrew.has(pilot.staffNumber) || !hasRoomForSharedPilot())) continue;
+    try {
+      const result = await syncSharedPilot(pilot);
+      changed += result.changed;
+      if (result.message) messages.push(`${pilot.name}: ${result.message}`);
+    } catch (error) {
+      messages.push(`${pilot.name}: ${error.message}`);
+    }
+  }
+  return changed;
 }
 
 function applyEmailRosterData(data) {
@@ -826,12 +882,18 @@ async function connectEmailRoster() {
     const people = new Set([...loadedRosters.map((roster, index) => roster.parsed.staffNumber || `manual-${index}`), ...emailConnections.map(connection => connection.staffNumber)]);
     if (!people.has(data.staffNumber) && people.size >= MAX_ROSTERS) throw new Error("You can load up to 5 pilots. Remove or disconnect a pilot before connecting another.");
     applyEmailRosterData(data);
-    const connection = { code, staffNumber: data.staffNumber, name: data.name, checkedAtUtc: data.checkedAtUtc,
+    const connection = { code, staffNumber: data.staffNumber, name: data.name, crew: data.crew || [], checkedAtUtc: data.checkedAtUtc,
       updatedAtUtc: data.periods.map(period => period.storedAtUtc).sort().at(-1) || "" };
     if (existing) emailConnections[emailConnections.indexOf(existing)] = connection;
     else emailConnections.push(connection);
+    excludedSharedCrew.delete(data.staffNumber);
     emailCodeInput.value = "";
-    emailStatus.textContent = data.message || (data.unavailable.length ? "Connected. Some periods are still becoming available; refresh shortly." : "Connected. Emailed rosters will refresh when you open the app.");
+    persistState();
+    const messages = [data.message || (data.unavailable.length ? "Connected. Some periods are still becoming available; refresh shortly." : "Connected. Emailed rosters will refresh when you open the app.")];
+    if (data.crewSharing === false) messages.push("Crew sharing can be enabled in Roster Export iCal.");
+    const shared = await refreshSharedCrew(messages);
+    if (shared) messages.push(`${shared} shared roster period${shared === 1 ? "" : "s"} loaded.`);
+    emailStatus.textContent = messages.join(" ");
     emailRostersChanged();
   } catch (error) { emailStatus.textContent = error.message || "Could not connect to the roster service."; }
   finally { emailBusy = false; renderEmailConnections(); }
@@ -850,15 +912,18 @@ async function refreshEmailConnections() {
         const data = await fetchEmailRosters(connection, knownEmailPeriods(loadedRosters, connection.staffNumber));
         changed += applyEmailRosterData(data);
         connection.name = data.name;
+        connection.crew = data.crew || [];
         connection.checkedAtUtc = data.checkedAtUtc;
         connection.updatedAtUtc = data.periods.map(period => period.storedAtUtc).sort().at(-1) || connection.updatedAtUtc || "";
         connection.error = data.unavailable.length ? "Some periods are still becoming available; refresh shortly." : data.message || "";
         if (connection.error) messages.push(`${connection.name || connection.staffNumber}: ${connection.error}`);
       } catch (error) {
+        connection.crew = [];
         connection.error = error.message || "Could not refresh. Last saved roster retained.";
         messages.push(`${connection.name || connection.staffNumber}: ${connection.error}`);
       }
     }
+    changed += await refreshSharedCrew(messages);
     if (changed) emailRostersChanged();
     else persistState();
     emailStatus.textContent = [`${changed} roster period${changed === 1 ? "" : "s"} updated.`, ...messages].join(" ");
@@ -880,6 +945,24 @@ emailCodeInput.addEventListener("keydown", event => {
   if (event.key === "Enter") { event.preventDefault(); connectEmailRoster(); }
 });
 emailRefreshButton.addEventListener("click", refreshEmailConnections);
+sharedCrewList.addEventListener("click", async event => {
+  const button = event.target.closest("[data-add-shared-crew]");
+  if (!button || emailBusy || isProcessing || !hasRoomForSharedPilot()) return;
+  const pilot = availableSharedCrew().get(button.dataset.addSharedCrew);
+  if (!pilot) return;
+  emailBusy = true;
+  renderEmailConnections();
+  emailStatus.textContent = `Loading ${pilot.name}’s roster…`;
+  try {
+    const { changed, message } = await syncSharedPilot(pilot);
+    if (changed) {
+      excludedSharedCrew.delete(pilot.staffNumber);
+      emailRostersChanged();
+    }
+    emailStatus.textContent = message || (changed ? `${pilot.name}’s roster is ready to compare.` : "No emailed roster available yet.");
+  } catch (error) { emailStatus.textContent = error.message; }
+  finally { emailBusy = false; renderEmailConnections(); }
+});
 emailConnectionList.addEventListener("click", event => {
   const button = event.target.closest("[data-disconnect-email]");
   if (!button || emailBusy || isProcessing) return;

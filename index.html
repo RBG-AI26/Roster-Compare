@@ -25,7 +25,7 @@
         }
       } catch { /* Use the default theme if storage is unavailable. */ }
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20261121-carry1" />
+    <link rel="stylesheet" href="./styles.css?v=20261122-crew1" />
   </head>
   <body>
     <main class="shell">
@@ -53,7 +53,7 @@
 
         <section class="panel" aria-labelledby="email-heading">
           <div class="panel-heading"><h2 id="email-heading">Emailed rosters</h2></div>
-          <p class="panel-copy">Connect a pilot's emailed roster using their private Overlap code. Only connect rosters you have permission to view.</p>
+          <p class="panel-copy">Use your private Overlap code to load your roster and any rosters your crew share with you.</p>
           <label for="email-connection-code">Private connection code</label>
           <input id="email-connection-code" type="password" autocomplete="off" spellcheck="false" placeholder="Paste roster-overlap:…" />
           <div class="email-actions">
@@ -62,6 +62,7 @@
           </div>
           <p class="panel-copy">Checks for changes when you open the app. Connections and downloaded rosters are saved on this device. Keep connection codes private.</p>
           <div id="email-connections"></div>
+          <div id="shared-crew" aria-label="Available shared rosters" hidden></div>
           <p id="email-status" class="status" role="status" aria-live="polite"></p>
         </section>
 
@@ -143,6 +144,6 @@
       </section>
     </main>
 
-    <script type="module" src="./app.js?v=20261121-carry1"></script>
+    <script type="module" src="./app.js?v=20261122-crew1"></script>
   </body>
 </html>

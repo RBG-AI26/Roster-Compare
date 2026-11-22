@@ -15,18 +15,21 @@ export function knownEmailPeriods(rosters, staffNumber) {
 }
 
 export async function fetchEmailRosters(connection, known = {}, fetcher = globalThis.fetch) {
+  const target = connection.crewStaffNumber;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
     const response = await fetcher(EMAIL_ROSTER_API, {
       method: 'POST', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: controller.signal,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${connectionToken(connection.code)}` },
-      body: JSON.stringify({ known }),
+      body: JSON.stringify(target ? { known, crewStaffNumber: target } : { known, includeCrew: true }),
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) throw new Error(data?.error || 'Could not refresh emailed rosters.');
     if (!data || !/^\d{4,}$/.test(data.staffNumber || '') || !Array.isArray(data.changed) || !Array.isArray(data.periods) || !Array.isArray(data.unavailable)) throw new Error('The roster service returned an invalid response.');
-    if (connection.staffNumber && connection.staffNumber !== data.staffNumber) throw new Error('This connection returned a different pilot. The saved roster was retained.');
+    const expectedStaff = target || connection.staffNumber;
+    if (expectedStaff && expectedStaff !== data.staffNumber) throw new Error('This connection returned a different pilot. The saved roster was retained.');
+    if (data.crew !== undefined && (!Array.isArray(data.crew) || data.crew.some(pilot => !pilot || typeof pilot.staffNumber !== 'string' || !/^\d{4,}$/.test(pilot.staffNumber) || pilot.staffNumber === data.staffNumber || typeof pilot.name !== 'string'))) throw new Error('The roster service returned an invalid crew list.');
     const listed = new Map(data.periods.map(period => [period.periodKey, period.contentHash]));
     if (data.changed.length > 64 || data.changed.some(period => typeof period.rosterText !== 'string' || !period.rosterText.trim() || period.rosterText.length > 2000000 || typeof period.fileName !== 'string' || !/^[a-f0-9]{64}$/.test(period.contentHash || '') || listed.get(period.periodKey) !== period.contentHash)) throw new Error('The roster service returned invalid roster periods.');
     for (const period of data.changed) {

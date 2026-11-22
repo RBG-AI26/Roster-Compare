@@ -554,6 +554,36 @@ test('failed or revoked refresh retains the last valid files; a bad period makes
   assert.equal(vm.runInContext('loadedRosters[0].text', ui.context), previous);
 });
 
+test('one connection loads both shared rosters and refreshes their hashes without storing extra codes', async () => {
+  const pilots = [{ staffNumber: '654321', name: 'TEST PILOT B' }, { staffNumber: '654322', name: 'TEST PILOT C' }];
+  const requests = [];
+  const ui = setup(undefined, undefined, async (_url, options) => {
+    assert.equal(options.headers.authorization, 'Bearer ' + 'a'.repeat(48));
+    const { known, includeCrew, crewStaffNumber } = JSON.parse(options.body);
+    requests.push({ known, crewStaffNumber });
+    if (includeCrew) return Response.json({ ...emailResponse([shortPeriod()], known), crew: pilots, crewSharing: true });
+    const pilot = pilots.find(item => item.staffNumber === crewStaffNumber);
+    return Response.json({ ...emailResponse([shortPeriod({ staff: pilot.staffNumber, name: pilot.name })], known, pilot.staffNumber), name: pilot.name });
+  });
+  await ui.connect(emailCode);
+  assert.equal(ui.elements.get('roster-count').textContent, '3 / 5 loaded');
+  assert.match(ui.elements.get('crew-list').innerHTML, /TEST PILOT B/);
+  assert.match(ui.elements.get('crew-list').innerHTML, /TEST PILOT C/);
+  assert.equal(ui.elements.get('results').classList.contains('hidden'), false);
+  assert.equal(JSON.parse(ui.store.get(storageKey)).emailConnections.length, 1);
+  await ui.refresh();
+  assert.equal(requests.length, 6);
+  assert.ok(requests.slice(3).every(request => Object.keys(request.known).length === 1));
+  assert.match(ui.elements.get('email-status').textContent, /0 roster periods updated/);
+  ui.remove(1);
+  await ui.refresh();
+  assert.equal(ui.elements.get('roster-count').textContent, '2 / 5 loaded');
+  const available = ui.elements.get('shared-crew');
+  assert.match(available.innerHTML, /TEST PILOT B/);
+  await available.events.click({ target: { closest: () => ({ dataset: { addSharedCrew: '654321' } }) } });
+  assert.equal(ui.elements.get('roster-count').textContent, '3 / 5 loaded');
+});
+
 test('empty connections wait for first email and clear saved data removes codes and rosters', async () => {
   let texts = [];
   const ui = setup(undefined, undefined, async (_url, options) => Response.json(emailResponse(texts, JSON.parse(options.body).known)));
